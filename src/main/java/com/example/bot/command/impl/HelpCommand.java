@@ -9,8 +9,32 @@ public class HelpCommand extends AbstractCommand {
     private final CommandRegistry commandRegistry;
 
     public HelpCommand(CommandRegistry commandRegistry) {
-        super("help", "Помощь по command бота");
+        super("help", "Помощь по commands");
         this.commandRegistry = commandRegistry;
+    }
+
+    @Override
+    public String getDetailedHelp() {
+        return """
+        *❓ Команда /help - Помощь по командам*
+        
+        *🎯 Описание:*
+        Основная команда для получения справки по всем возможностям бота.
+        
+        *📝 Использование:*
+        `/help` - показать все команды
+        `/help <команда>` - подробная справка по конкретной команде
+        
+        *📊 Примеры:*
+        • `/help` - список всех команд
+        • `/help todo` - подробно о команде todo
+        • `/help wishlist` - подробно о команде wishlist
+        
+        *💡 Особенности:*
+        • Полная документация по командам
+        • Примеры использования
+        • Подробные объяснения функций
+        """;
     }
 
     @Override
@@ -26,33 +50,48 @@ public class HelpCommand extends AbstractCommand {
 
     private String getAllCommandsHelp() {
         StringBuilder helpText = new StringBuilder();
-        helpText.append("*Доступные команды:*\n\n");
+        helpText.append("ℹ️ *Доступные команды:*\n\n");
 
+        int commandNumber = 1;
         for (Command command : commandRegistry.getAllCommands()) {
-            helpText.append("/")
+            helpText.append(commandNumber++)
+                    .append(". `/")
                     .append(command.getBotCommand().getCommand())
-                    .append(" - ")
+                    .append("` - ")
                     .append(command.getDescription())
                     .append("\n");
         }
 
-        helpText.append("\nДля получения подробной информации о команде используйте: /help <команда>");
+        helpText.append("\nДля подробной информации o command: `/help <команда>`");
+        helpText.append("\nВсего команд: ").append(commandRegistry.getCommandCount());
+
         return helpText.toString();
     }
 
     private String getSpecificHelp(String commandName) {
+        // Убираем слэш если он есть и приводим к нижнему регистру
         if (commandName.startsWith("/")) {
             commandName = commandName.substring(1);
         }
+        commandName = commandName.toLowerCase();
 
         Command command = commandRegistry.getCommand(commandName);
         if (command != null) {
-            return String.format("*Команда /%s*\n\n%s",
-                    commandName,
-                    command.getDescription());
+            return command.getDetailedHelp();
         } else {
-            return "Команда \"/" + commandName + "\" *не найдена*.\n" +
-                    "Используйте /help для просмотра всех доступных команд.";
+            return String.format(
+                    "Команда \"/%s\" не найдена.\n" +
+                            "Used `/help` для просмотра всех команд.\n" +
+                            "Проверьте правильность написания команды.",
+                    commandName
+            );
         }
+    }
+
+    @Override
+    public boolean canExecute(Message message) {
+        // HelpCommand может обрабатывать как /help, так и /help <команда>
+        return super.canExecute(message) ||
+                (message.hasText() && message.getText().startsWith("/help "));
     }
 }

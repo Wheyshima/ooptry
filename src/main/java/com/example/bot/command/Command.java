@@ -8,4 +8,5 @@ public interface Command {
     BotCommand getBotCommand();
     String getDescription();
     boolean canExecute(Message message);
+    String getDetailedHelp();
 }

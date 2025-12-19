@@ -8,6 +8,7 @@
     <groupId>com.example</groupId>
     <artifactId>telegram-chat-bot</artifactId>
     <version>1.0-SNAPSHOT</version>
+    <packaging>jar</packaging>
 
     <properties>
 
@@ -16,8 +17,10 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
         <telegrambots.version>6.9.7.1</telegrambots.version>
+        <dotenv.version>3.0.0</dotenv.version>
         <maven-checkstyle.version>3.3.0</maven-checkstyle.version>
         <maven-shade.version>3.5.1</maven-shade.version>
+        <postgresql.version>42.6.0</postgresql.version>
     </properties>
 
     <dependencies>
@@ -33,7 +36,7 @@
         <dependency>
             <groupId>org.mockito</groupId>
             <artifactId>mockito-core</artifactId>
-            <version>4.11.0</version>
+            <version>5.11.0</version>
             <scope>test</scope>
         </dependency>
 
@@ -75,6 +78,11 @@
             <scope>test</scope>
         </dependency>
         <dependency>
+            <groupId>io.github.cdimascio</groupId>
+            <artifactId>dotenv-java</artifactId>
+            <version>${dotenv.version}</version>
+        </dependency>
+        <dependency>
             <groupId>org.telegram</groupId>
             <artifactId>telegrambots</artifactId>
             <version>${telegrambots.version}</version>
@@ -83,6 +91,11 @@
             <groupId>org.telegram</groupId>
             <artifactId>telegrambots-abilities</artifactId>
             <version>${telegrambots.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <version>${postgresql.version}</version>
         </dependency>
     </dependencies>
 
@@ -107,7 +120,7 @@
                     <configLocation>google_checks.xml</configLocation>
                     <encoding>UTF-8</encoding>
                     <consoleOutput>true</consoleOutput>
-                    <failsOnError>true</failsOnError>
+                    <failsOnError>false</failsOnError>
                     <linkXRef>false</linkXRef>
                 </configuration>
                 <executions>

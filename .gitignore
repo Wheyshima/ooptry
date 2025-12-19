@@ -5,6 +5,8 @@ out/
 .kotlin
 .env
 
+# Maven
+target/
 ### Eclipse ###
 .apt_generated
 .classpath
