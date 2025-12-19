@@ -1,0 +1,5 @@
+com\example\bot\command\impl\AuthorsCommandTest.class
+com\example\bot\ChatBotTest.class
+com\example\bot\command\impl\AboutCommandTest.class
+com\example\bot\command\impl\HelpCommandTest.class
+com\example\bot\command\impl\StartCommandTest.class

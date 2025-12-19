@@ -1,0 +1,9 @@
+com\example\bot\command\impl\AuthorsCommand.class
+com\example\bot\command\AbstractCommand.class
+com\example\bot\command\CommandRegistry.class
+com\example\bot\command\impl\StartCommand.class
+com\example\bot\ChatBot.class
+com\example\bot\command\impl\AboutCommand.class
+com\example\bot\BotApplication.class
+com\example\bot\command\Command.class
+com\example\bot\command\impl\HelpCommand.class
