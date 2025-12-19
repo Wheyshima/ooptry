@@ -1,18 +1,32 @@
 package com.example.bot.command.impl;
 
 import org.junit.jupiter.api.Test;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.*;
 
 public class AuthorsCommandTest {
 
     @Test
     void shouldReturnAuthorsInfo() {
         AuthorsCommand command = new AuthorsCommand();
-        String response = command.execute(null); // Message не используется
+        String response = command.execute(null);
 
-        assertTrue(response.contains("Авторы проекта"));
+        assertTrue(response.contains("Авторы BestDay"));
         assertTrue(response.contains("harumiRui"));
         assertTrue(response.contains("angrycoke"));
-        assertTrue(response.startsWith("*Авторы проекта*")); // проверяем Markdown
+        assertTrue(response.contains("дуэт"));
+        assertTrue(response.contains("осознанной жизни"));
+        assertTrue(response.contains("Наша история"));
+        assertTrue(response.contains("Контакты"));
+        assertTrue(response.contains("harumiRui: @harumi_rui"));
+        assertTrue(response.contains("angrycoke: @wheyshima"));
+        assertTrue(response.contains("Благодарности"));
+        assertTrue(response.contains("С любовью к осознанности"));
+    }
+
+    @Test
+    void commandNameAndDescriptionShouldBeCorrect() {
+        AuthorsCommand command = new AuthorsCommand();
+        assertEquals("authors", command.getBotCommand().getCommand());
+        assertEquals("my CREATORS", command.getDescription());
     }
 }

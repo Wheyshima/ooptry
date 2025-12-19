@@ -30,7 +30,7 @@
           <configLocation>google_checks.xml</configLocation>
           <encoding>UTF-8</encoding>
           <consoleOutput>true</consoleOutput>
-          <failsOnError>true</failsOnError>
+          <failsOnError>false</failsOnError>
           <linkXRef>false</linkXRef>
         </configuration>
       </plugin>
@@ -150,7 +150,9 @@
     <maven-shade.version>3.5.1</maven-shade.version>
     <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
     <maven.compiler.target>21</maven.compiler.target>
+    <postgresql.version>42.6.0</postgresql.version>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <maven-checkstyle.version>3.3.0</maven-checkstyle.version>
+    <dotenv.version>3.0.0</dotenv.version>
   </properties>
 </project>

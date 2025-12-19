@@ -2,27 +2,27 @@ package com.example.bot.command.impl;
 
 import com.example.bot.command.AbstractCommand;
 import org.junit.jupiter.api.Test;
+import org.telegram.telegrambots.meta.api.objects.Message;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.mock;
 
 public class StartCommandTest {
 
     @Test
     public void shouldReturnCorrectStartMessage() {
         StartCommand command = new StartCommand();
-        String response = command.execute(null); // ✅ null вместо mock!
+        String response = command.execute(mock(Message.class));
 
-        assertTrue(response.contains("Привет!"));
-        assertTrue(response.contains("Умный помощник для заметок"));
-        assertTrue(response.contains("used /help для просмотра"));
-        assertTrue(response.contains("*Умный помощник"));
+        assertTrue(response.contains("BestDay"));
+        assertTrue(response.contains("помощник"));
+        assertTrue(response.contains("/help"));
     }
 
     @Test
     public void commandNameAndDescriptionShouldBeCorrect() {
         StartCommand command = new StartCommand();
-        assertEquals("start", command.getCommandIdentifier());      // ✅ assertEquals вместо assertTrue
-        assertEquals("Запуск бота", command.getDescription());
+        assertEquals("start", command.getBotCommand().getCommand());
+        assertEquals("Запуск бота если ВЫ забыли", command.getDescription());
     }
 }
