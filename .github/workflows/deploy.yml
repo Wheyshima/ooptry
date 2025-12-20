@@ -1,0 +1,41 @@
+name: Auto-Deploy Telegram Bot
+
+on:
+  push:
+    branches: [ main ]  # ← автоматически при каждом коммите
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: 'maven'
+
+      - name: Build JAR
+        run: mvn -B package -DskipTests
+
+      - name: Setup SSH key
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_KEY }}
+
+      - name: Deploy to server
+        run: |
+          JAR=$(find target -name "*.jar" -type f | head -n1)
+          if [ -z "$JAR" ]; then echo "❌ JAR not found"; exit 1; fi
+          echo "📦 Deploying: $JAR"
+
+          scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            "$JAR" \
+            ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/home/${{ secrets.SSH_USER }}/bot/app.jar
+
+          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} \
+            'sudo systemctl restart telegram-bot'

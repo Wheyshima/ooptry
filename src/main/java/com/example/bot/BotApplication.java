@@ -1,6 +1,5 @@
 package com.example.bot;
 
-
 import com.example.bot.database.DatabaseManager;
 import io.github.cdimascio.dotenv.Dotenv;
 import org.telegram.telegrambots.meta.TelegramBotsApi;
@@ -15,11 +14,15 @@ public class BotApplication {
             TelegramBotsApi botsApi = new TelegramBotsApi(DefaultBotSession.class);
 
             Dotenv dotenv = Dotenv.load();
+            String weatherApiKey = dotenv.get("OPENWEATHER_API_KEY");
             // ЗАМЕНИТЕ на реальные данные вашего бота
             String botUsername = dotenv.get( "TELEGRAM_BOT_NAME");
             String botToken = dotenv.get("TELEGRAM_BOT_TOKEN");
             if (botToken == null || botToken.isEmpty()) {
                 throw new IllegalStateException("TELEGRAM_BOT_TOKEN environment variable is not set!");
+            }
+            if (weatherApiKey == null || weatherApiKey.isEmpty()) {
+                throw new IllegalStateException("OPENWEATHER_API_KEY is not set in .env!");
             }
 
             String dbUrl = dotenv.get("DATABASE_URL", "jdbc:postgresql://localhost:5432/telegram_bot");
@@ -30,7 +33,7 @@ public class BotApplication {
 
             DatabaseManager databaseManager = new DatabaseManager(dbUrl, dbUsername, dbPassword);
 
-            ChatBot bot = new ChatBot(botUsername, botToken, databaseManager);
+            ChatBot bot = new ChatBot(botUsername, botToken, databaseManager,weatherApiKey);
             botsApi.registerBot(bot);
 
             System.out.println("Бот успешно запущен!");
@@ -47,5 +50,7 @@ public class BotApplication {
             System.err.println("Неожиданная ошибка: " + e.getMessage());
             e.printStackTrace();
         }
+
     }
+
 }

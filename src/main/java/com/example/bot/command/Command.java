@@ -9,4 +9,5 @@ public interface Command {
     String getDescription();
     boolean canExecute(Message message);
     String getDetailedHelp();
+
 }

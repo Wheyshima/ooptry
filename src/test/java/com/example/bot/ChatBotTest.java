@@ -3,7 +3,6 @@ package com.example.bot;
 import com.example.bot.database.DatabaseManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.mockito.MockedStatic;
 import org.telegram.telegrambots.meta.api.objects.Message;
 import org.telegram.telegrambots.meta.api.objects.Update;
 import org.telegram.telegrambots.meta.api.objects.User;
@@ -12,14 +11,14 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 class ChatBotTest {
-
+    private static final String TEST_WEATHER_API_KEY = "test_openweather_key_123";
     private ChatBot chatBot;
     private DatabaseManager databaseManager;
 
     @BeforeEach
     void setUp() {
         databaseManager = mock(DatabaseManager.class);
-        chatBot = new ChatBot("test_bot", "test_token", databaseManager);
+        chatBot = new ChatBot("test_bot", "test_token", databaseManager,TEST_WEATHER_API_KEY);
     }
 
     @Test

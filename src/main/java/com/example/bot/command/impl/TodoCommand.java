@@ -1,24 +1,24 @@
 package com.example.bot.command.impl;
 
-import com.example.bot.ChatBot;
 import com.example.bot.command.AbstractCommand;
 import com.example.bot.database.DatabaseManager;
+import com.example.bot.service.UserStateService;
 import org.telegram.telegrambots.meta.api.objects.Message;
 
 import java.util.List;
 
 public class TodoCommand extends AbstractCommand {
     private final DatabaseManager databaseManager;
-    private final ChatBot chatBot;
+    private final UserStateService userStateService;
 
     // Константы для валидации
     private static final int MIN_TASK_LENGTH = 2;
     private static final int MAX_TASK_LENGTH = 50;
 
-    public TodoCommand(DatabaseManager databaseManager, ChatBot chatBot) {
+    public TodoCommand(DatabaseManager databaseManager, UserStateService userStateService) {
         super("todo", "Управление ежедневными задачами");
         this.databaseManager = databaseManager;
-        this.chatBot = chatBot;
+        this.userStateService = userStateService;
     }
 
     @Override
@@ -26,8 +26,8 @@ public class TodoCommand extends AbstractCommand {
         String argument = getCommandArgument(message).trim();
         Long userId = message.getFrom().getId();
 
-        if (chatBot.hasActiveState(userId)) {
-            chatBot.cancelUserState(userId);
+        if (userStateService.hasActiveState(userId)) {
+            userStateService.cancelUserState(userId);
             return "⚠️ Предыдущее действие отменено. Обрабатываю новую команду...";
         }
 
@@ -39,7 +39,6 @@ public class TodoCommand extends AbstractCommand {
             case "add" -> handleAddTask(userId, getActionArgument(argument, "add"));
             case "complete" -> handleCompleteTask(userId, getActionArgument(argument, "complete"));
             case "edit" -> handleEditTask(userId, getActionArgument(argument, "edit"));
-            case "stats" -> showStats(userId);
             default -> getUsage();
         };
     }
@@ -51,7 +50,6 @@ public class TodoCommand extends AbstractCommand {
         if (argument.startsWith("add ")) return "add";
         if (argument.startsWith("complete ")) return "complete";
         if (argument.startsWith("edit ")) return "edit";
-        if (argument.equals("stats")) return "stats";
         return "unknown";
     }
 
@@ -62,7 +60,7 @@ public class TodoCommand extends AbstractCommand {
         return argument.substring(action.length()).trim();
     }
 
-    private String handleAddTask(Long userId, String taskText) {
+    public String handleAddTask(Long userId, String taskText) {
         if (taskText.isEmpty()) {
             return """
                 ⚠️ Пожалуйста, укажите текст задачи
@@ -88,10 +86,15 @@ public class TodoCommand extends AbstractCommand {
             List<DatabaseManager.Task> tasks = databaseManager.getDailyTasks(userId);
 
             if (displayIndex < 1 || displayIndex > tasks.size()) {
-                return "❌ Неверный номер задачи. У вас всего " + tasks.size() + " задач.";
+                return "❌ Неверный номер задачи.\nУ вас всего " + tasks.size() + " задач.\nПросмотреть все задачи: /todo";
             }
 
             DatabaseManager.Task task = tasks.get(displayIndex - 1);
+            if (task.isCompleted()) {
+                return "⚠️ Задача #" + displayIndex + " уже завершена.\n" +
+                        "Не нужно завершать её повторно — вы молодец! \uD83D\uDC4F\n"+
+                        "Просмотреть все задачи: /todo";
+            }
             int realTaskId = task.getId(); // ← реальный id из БД
             return completeTask(userId, realTaskId); // ← передаём реальный id
         } catch (NumberFormatException e) {
@@ -99,19 +102,19 @@ public class TodoCommand extends AbstractCommand {
         }
     }
 
-    private String handleEditTask(Long userId, String taskIdArg) {
+    public String handleEditTask(Long userId, String taskIdArg) {
         try {
             int displayIndex = Integer.parseInt(taskIdArg);
             List<DatabaseManager.Task> tasks = databaseManager.getDailyTasks(userId);
 
             if (displayIndex < 1 || displayIndex > tasks.size()) {
-                return "❌ Неверный номер задачи. У вас всего " + tasks.size() + " задач.";
+                return "❌ Неверный номер задачи. \nУ вас всего " + tasks.size() + " задач.\nПросмотреть все задачи: /todo";
             }
             DatabaseManager.Task task = tasks.get(displayIndex - 1);
             int realTaskId = task.getId();
             return startTaskEdit(userId, realTaskId);
         } catch (NumberFormatException e) {
-            return "❌ Неверный формат ID задачи. Используйте: `/todo edit <число>`";
+            return "❌ Неверный формат ID задачи. \nИспользуйте: `/todo edit <число>`";
         }
     }
 
@@ -135,8 +138,8 @@ public class TodoCommand extends AbstractCommand {
     }
 
     private String startTaskEdit(Long userId, int realTaskId) {
-        if (chatBot.hasActiveState(userId)) {
-            chatBot.cancelUserState(userId);
+        if (userStateService.hasActiveState(userId)) {
+            userStateService.cancelUserState(userId);
             return "⚠️ Предыдущее действие отменено. Начинаем новое редактирование...";
         }
 
@@ -155,12 +158,12 @@ public class TodoCommand extends AbstractCommand {
 
         if (targetTask == null) {
             return "❌ Задача с ID " + displayIndex + " не найдена или уже истекла.\n" +
-                    "Проверьте актуальный список задач: `/todo`";
+                    "Проверьте актуальный список задач: /todo";
         }
 
         if (targetTask.isCompleted()) {
-            return "⚠️ Нельзя редактировать завершенную задачу #" + displayIndex + "\n" +
-                    "Завершенные задачи доступны только для просмотра.";
+            return "⚠️ Нельзя редактировать *завершенную* задачу #" + displayIndex + "\n" +
+                    "Завершенные задачи доступны только для просмотра: /todo";
         }
 
         String validationError = validateTaskText(targetTask.getText());
@@ -168,7 +171,7 @@ public class TodoCommand extends AbstractCommand {
             return validationError;
         }
 
-        chatBot.startTodoEditState(userId, realTaskId);
+        userStateService.startTodoEditState(userId, realTaskId);
 
         return """
             ✏️ *Редактирование задачи #%d*
@@ -265,7 +268,7 @@ public class TodoCommand extends AbstractCommand {
     private String showTasks(Long userId) {
         List<DatabaseManager.Task> tasks = databaseManager.getDailyTasks(userId);
         if (tasks.isEmpty()) {
-            return "📭 На сегодня задач нет. Добавьте новую: \n`/todo add <ваша задача>`";
+            return "📭 На сегодня задач нет. \nДобавьте новую: `/todo add <ваша задача>`";
         }
 
         StringBuilder sb = new StringBuilder("*📋 Ваши задачи на сегодня:*\n\n");
@@ -363,7 +366,7 @@ public class TodoCommand extends AbstractCommand {
 
         if (!taskExists) {
             return "❌ Задача не найдена\n" +
-                    "Проверьте актуальный список задач: `/todo`";
+                    "Проверьте актуальный список задач: /todo";
         }
 
         if (databaseManager.completeDailyTask(userId, taskId)) {
@@ -377,20 +380,6 @@ public class TodoCommand extends AbstractCommand {
                 "Проверьте актуальный список задач: /todo";
     }
 
-    private String showStats(Long userId) {
-        List<DatabaseManager.Task> tasks = databaseManager.getDailyTasks(userId);
-        int completedCount = (int) tasks.stream().filter(DatabaseManager.Task::isCompleted).count();
-        double completionRate = databaseManager.getDailyCompletionRate(userId);
-
-        return """
-            📊 *Статистика задач:*
-            
-            • Всего задач: %d
-            • Выполнено: %d
-            • Прогресс: %.1f%%
-            """.formatted(tasks.size(), completedCount, completionRate);
-    }
-
     private String getUsage() {
         return """
             🎯 *Управление задачами:*
@@ -399,9 +388,8 @@ public class TodoCommand extends AbstractCommand {
             • `/todo add <текст>` - добавить задачу
             • `/todo complete <ID>` - завершить задачу
             • `/todo edit <ID>` - редактировать задачу
-            • `/todo stats` - статистика выполнения
             
-            ⏰ Задачи автоматически удаляются в 00:00
+            ⏰ Задачи автоматически удаляются в 23:59
             """;
     }
 }

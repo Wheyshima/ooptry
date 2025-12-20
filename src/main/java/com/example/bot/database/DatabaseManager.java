@@ -10,7 +10,6 @@ public class DatabaseManager {
     private final String username;
     private final String password;
     public static final int WISHLIST_LOCK_DAYS = 60;
-    public record UserWithCity(long userId, String city) {} // DTO
 
     public static class Task {
         private final int id;
@@ -28,6 +27,7 @@ public class DatabaseManager {
         public int getId() { return id; }
         public String getText() { return text; }
         public boolean isCompleted() { return completed; }
+        @SuppressWarnings("unused")
         public LocalDateTime getCreatedAt() { return createdAt; }
     }
     public static class Wish {
@@ -46,6 +46,7 @@ public class DatabaseManager {
         public int getId() { return id; }
         public String getText() { return text; }
         public boolean isCompleted() { return completed; }
+        @SuppressWarnings("unused")
         public LocalDateTime getCreatedAt() { return createdAt; }
     }
 
@@ -71,6 +72,7 @@ public class DatabaseManager {
         // Геттеры (опционально, но рекомендуются)
         public double getCompletionRate() { return completionRate; }
         public LocalDate getStatDate() { return statDate; }
+        @SuppressWarnings("unused")
         public LocalDateTime getCreatedAt() { return createdAt; }
         public int getTotalTasks() { return totalTasks; }
         public int getCompletedTasks() { return completedTasks; }
@@ -124,14 +126,6 @@ public class DatabaseManager {
                 )
             """);
 
-            // Таблица с городами
-            conn.createStatement().execute("""
-                CREATE TABLE IF NOT EXISTS user_city (
-                    id BIGINT PRIMARY KEY,
-                    city Text
-                )
-            """);
-
             // Таблица карты желаний
             conn.createStatement().execute("""
                 CREATE TABLE IF NOT EXISTS wishlist (
@@ -151,6 +145,7 @@ public class DatabaseManager {
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """);
+
 
             conn.createStatement().execute("""
                 CREATE TABLE IF NOT EXISTS productivity_stats (
@@ -246,6 +241,24 @@ public class DatabaseManager {
         return stats;
     }
 
+
+
+    // В   fdfdfdDatabaseManager.java
+    public List<Long> getAllUserIds(){
+        String sql = "SELECT user_id FROM users";
+        List<Long> userIds = new ArrayList<>();
+        try (Connection conn = getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql);
+             ResultSet rs = stmt.executeQuery()) {
+            while (rs.next()) {
+                userIds.add(rs.getLong("user_id"));
+            }
+        } catch (SQLException e) {
+            System.err.println("Ошибка получения списка пользователей"+ e.getMessage());
+        }
+        return userIds;
+    }
+
     public void cleanupAllDailyTasks() {
         try (Connection conn = getConnection()) {
             String sql = "DELETE FROM daily_tasks";
@@ -269,39 +282,6 @@ public class DatabaseManager {
             System.err.println("Ошибка получения города: " + e.getMessage());
         }
         return null;
-    }
-
-    public List<UserWithCity> getAllUsersWithCities() {
-        List<UserWithCity> users = new ArrayList<>();
-        String sql = "SELECT user_id, city FROM users WHERE city IS NOT NULL AND city != ''";
-
-        try (Connection conn = getConnection();
-             PreparedStatement stmt = conn.prepareStatement(sql);
-             ResultSet rs = stmt.executeQuery()) {
-
-            while (rs.next()) {
-                users.add(new UserWithCity(rs.getLong("user_id"), rs.getString("city")));
-            }
-        } catch (SQLException e) {
-            e.printStackTrace();
-        }
-        return users;
-    }
-
-    public List<Long> getAllUserIds() {
-        List<Long> ids = new ArrayList<>();
-        String sql = "SELECT DISTINCT user_id FROM users";
-        try (Connection conn = getConnection();
-             PreparedStatement stmt = conn.prepareStatement(sql);
-             ResultSet rs = stmt.executeQuery()) {
-            while (rs.next()) {
-                ids.add(rs.getLong("user_id"));
-            }
-        } catch (SQLException e) {
-            System.err.println("Ошибка получения списка пользователей: " + e.getMessage());
-            e.printStackTrace();
-        }
-        return ids;
     }
 
     // Методы для ежедневных задач
@@ -522,25 +502,7 @@ public class DatabaseManager {
         }
     }
 
-    public void resetWishlist() {
-        try (Connection conn = getConnection()) {
-            // Сбрасываем основную таблицу wishlist
-            String resetWishlistSQL = "DELETE FROM wishlist";
-            try (PreparedStatement stmt = conn.prepareStatement(resetWishlistSQL)) {
-                stmt.executeUpdate();
-            }
 
-            // Сбрасываем блокировки
-            String resetLocksSQL = "UPDATE wishlist_locks SET locked = false, lock_until = null";
-            try (PreparedStatement stmt = conn.prepareStatement(resetLocksSQL)) {
-                stmt.executeUpdate();
-            }
-
-        } catch (SQLException e) {
-            System.err.println("Ошибка сброса wishlist: " + e.getMessage());
-            throw new RuntimeException(e);
-        }
-    }
 
     public LocalDateTime getLockUntil(Long userId) {
         String sql = "SELECT lock_until FROM wishlist_locks WHERE user_id = ? AND locked = TRUE";
@@ -674,6 +636,26 @@ public class DatabaseManager {
         } catch (SQLException e) {
             System.err.println("Ошибка сохранения статистики: " + e.getMessage());
         }
+    }
+    // В DatabaseManager.java
+    public List<Long> getUsersWithIncompleteTasks() {
+        String sql = """
+        SELECT DISTINCT user_id
+        FROM daily_tasks
+        WHERE completed = false
+          AND DATE(created_at) = CURRENT_DATE
+        """;
+        List<Long> userIds = new ArrayList<>();
+        try (Connection conn = getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql);
+             ResultSet rs = stmt.executeQuery()) {
+            while (rs.next()) {
+                userIds.add(rs.getLong("user_id"));
+            }
+        } catch (SQLException e) {
+            System.err.println("Ошибка получения пользователей с задачами"+ e.getMessage());
+        }
+        return userIds;
     }
 
     // Метод для получения статистики пользователя за сегодня

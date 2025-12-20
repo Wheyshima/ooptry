@@ -22,13 +22,14 @@ public class WishlistCommand extends AbstractCommand {
         String argument = getCommandArgument(message); // ← НЕ вызываем .trim() здесь!
         Long userId = message.getFrom().getId();
 
-        // Проверяем блокировку
+        // Проверяем блокировку: если заблокировано И команда НЕ разрешена — ошибка
         if (databaseManager.isWishlistLocked(userId)) {
-            if (getCommandAction(argument).equals("complete") ||
+            String action = getCommandAction(argument);
+            boolean isAllowed = action.equals("complete") ||
                     argument.equals("status") ||
-                    argument.isEmpty()) {
-                // Разрешено
-            } else {
+                    argument.isEmpty();
+
+            if (!isAllowed) {
                 return getLockedMessage(userId);
             }
         }
@@ -86,8 +87,8 @@ public class WishlistCommand extends AbstractCommand {
     @Override
     public String getDetailedHelp() {
         return """
-            🌟 *команда /wishlist - карта ваших судьбоносных целей* 
-            
+            🌟 *команда /wishlist - карта ваших судьбоносных целей*
+        
             🎯 *сакральное пространство ваших намерений*
             здесь рождаются и фиксируются ваши самые сокровенные желания,
             становясь частью ткани мироздания.
@@ -266,9 +267,11 @@ public class WishlistCommand extends AbstractCommand {
         int wishCount = databaseManager.getWishCount(userId);
 
         if (wishCount == 0) {
-            return "❌ Нельзя заблокировать пустой список желаний!\n\n" +
-                    "Сначала добавьте хотя бы одно желание:\n" +
-                    "`/wishlist add <ваше желание>`";
+            return """
+                    ❌ Нельзя заблокировать пустой список желаний!
+                    
+                    Сначала добавьте хотя бы одно желание:
+                    `/wishlist add <ваше желание>`""";
         }
 
         // ВЫЗЫВАЕМ ФАКТИЧЕСКУЮ БЛОКИРОВКУ

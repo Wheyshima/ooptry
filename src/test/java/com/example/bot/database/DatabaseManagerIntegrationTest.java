@@ -40,7 +40,7 @@ class DatabaseManagerIntegrationTest {
         DB_PASSWORD = props.getProperty("db.password");
 
         // Проверяем подключение
-        try (var conn = DriverManager.getConnection(DB_URL, DB_USER, DB_PASSWORD)) {
+        try (var ignored = DriverManager.getConnection(DB_URL, DB_USER, DB_PASSWORD)) {
             System.out.println("✅ Успешное подключение к тестовой БД: " + DB_URL);
         } catch (Exception e) {
             throw new IllegalStateException("Не удаётся подключиться к БД", e);
@@ -179,8 +179,8 @@ class DatabaseManagerIntegrationTest {
         Long userId = 12345L;
         databaseManager.saveUser(userId, "testuser");
 
-        int wishId1 = databaseManager.addWish(userId, "Желание 1");
-        int wishId2 = databaseManager.addWish(userId, "Желание 2");
+        databaseManager.addWish(userId, "Желание 1");
+        databaseManager.addWish(userId, "Желание 2");
 
         // Блокируем список
         databaseManager.lockWishlist(userId);
@@ -284,8 +284,8 @@ class DatabaseManagerIntegrationTest {
 
         // ✅ Сохраняем реальные ID задач
         int taskId1 = databaseManager.addDailyTask(user1, "Задача 1");
-        int taskId2 = databaseManager.addDailyTask(user1, "Задача 2");
-        int taskId3 = databaseManager.addDailyTask(user2, "Задача A");
+        databaseManager.addDailyTask(user1, "Задача 2");
+        databaseManager.addDailyTask(user2, "Задача A");
 
         // ✅ Завершаем задачу по её реальному ID
         databaseManager.completeDailyTask(user1, taskId1); // Завершаем первую задачу
@@ -343,7 +343,7 @@ class DatabaseManagerIntegrationTest {
     @Test
     void cleanupOldProductivityStats_removesOldData() {
         // Given
-        Long userId = 12345L;
+        long userId = 12345L;
         databaseManager.saveUser(userId, "testuser");
         // Дата из текущей недели (например, понедельник текущей недели)
         LocalDate thisWeekDate = LocalDate.now().minusDays(LocalDate.now().getDayOfWeek().getValue() - 1);

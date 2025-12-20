@@ -3,7 +3,6 @@ package com.example.bot.command;
 
 import com.example.bot.command.impl.AboutCommand;
 import com.example.bot.command.impl.AuthorsCommand;
-import com.example.bot.command.impl.HelpCommand;
 import com.example.bot.command.impl.StartCommand;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -52,7 +51,7 @@ class CommandRegistryTest {
 
         // Then
         assertEquals(3, commands.size());
-        assertEquals("start", commands.get(0).getBotCommand().getCommand());
+        assertEquals("start", commands.getFirst().getBotCommand().getCommand());
     }
 
     @Test

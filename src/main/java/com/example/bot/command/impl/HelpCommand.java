@@ -55,9 +55,9 @@ public class HelpCommand extends AbstractCommand {
         int commandNumber = 1;
         for (Command command : commandRegistry.getAllCommands()) {
             helpText.append(commandNumber++)
-                    .append(". `/")
+                    .append(". /")
                     .append(command.getBotCommand().getCommand())
-                    .append("` - ")
+                    .append(" - ")
                     .append(command.getDescription())
                     .append("\n");
         }
@@ -80,9 +80,10 @@ public class HelpCommand extends AbstractCommand {
             return command.getDetailedHelp();
         } else {
             return String.format(
-                    "Команда \"/%s\" не найдена.\n" +
-                            "Used `/help` для просмотра всех команд.\n" +
-                            "Проверьте правильность написания команды.",
+                    """
+                            Команда "/%s" не найдена.
+                            Used `/help` для просмотра всех команд.
+                            Проверьте правильность написания команды.""",
                     commandName
             );
         }
