@@ -1,6 +1,5 @@
 package com.example.bot.command.impl;
 
-import com.example.bot.command.AbstractCommand;
 import org.junit.jupiter.api.Test;
 import org.telegram.telegrambots.meta.api.objects.Message;
 

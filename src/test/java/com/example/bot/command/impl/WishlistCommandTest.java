@@ -22,7 +22,6 @@ class WishlistCommandTest {
     private DatabaseManager mockDatabaseManager;
     private WishlistCommand wishlistCommand;
     private Message mockMessage;
-    private User mockUser;
 
     @BeforeEach
     void setUp() {
@@ -31,7 +30,7 @@ class WishlistCommandTest {
         wishlistCommand = new WishlistCommand(mockDatabaseManager);
 
         mockMessage = Mockito.mock(Message.class);
-        mockUser = Mockito.mock(User.class);
+        User mockUser = Mockito.mock(User.class);
 
         when(mockMessage.getFrom()).thenReturn(mockUser);
         when(mockUser.getId()).thenReturn(12345L);
@@ -219,7 +218,7 @@ class WishlistCommandTest {
         when(mockDatabaseManager.getLockUntil(12345L)).thenReturn(LocalDateTime.now().plusDays(30));
 
         String result = wishlistCommand.execute(mockMessage);
-        //System.out.println(result);
+        System.out.println(result);
         assertTrue(result.contains("🔒 *Добавление желаний заблокировано!*"));
         assertTrue(result.contains("Осталось дней: "));
     }

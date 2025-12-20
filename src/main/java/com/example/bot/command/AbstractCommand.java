@@ -26,9 +26,10 @@ public abstract class AbstractCommand implements Command {
     public String getDetailedHelp() {
         // Базовая реализация - можно переопределить в дочерних классах
         return String.format(
-                "*Команда /%s*\n" +
-                        "*Описание:* %s\n" +
-                        "*Быстрый доступ:* Напишите /%s в чат",
+                """
+                        *Команда /%s*
+                        *Описание:* %s
+                        *Быстрый доступ:* Напишите /%s в чат""",
                 botCommand.getCommand(),
                 description,
                 botCommand.getCommand()

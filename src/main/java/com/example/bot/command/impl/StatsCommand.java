@@ -3,6 +3,8 @@ package com.example.bot.command.impl;
 import com.example.bot.command.AbstractCommand;
 import com.example.bot.database.DatabaseManager;
 import org.telegram.telegrambots.meta.api.objects.Message;
+import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup;
+import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton;
 
 import java.util.List;
 import java.time.LocalDate;
@@ -14,7 +16,16 @@ public class StatsCommand extends AbstractCommand {
         super("stats", "Показать статистику выполнения");
         this.databaseManager = databaseManager;
     }
+    public static InlineKeyboardMarkup getWeekStatsKeyboard() {
+        InlineKeyboardButton weekButton = InlineKeyboardButton.builder()
+                .text("📊 Посмотреть за неделю")
+                .callbackData("stats:week")
+                .build();
 
+        return InlineKeyboardMarkup.builder()
+                .keyboardRow(List.of(weekButton))
+                .build();
+    }
     @Override
     public String getDetailedHelp() {
         return """
@@ -63,7 +74,6 @@ public class StatsCommand extends AbstractCommand {
         String city = databaseManager.getUserCity(userId);
 
         StringBuilder sb = new StringBuilder("*📊 Статистика за сегодня:*\n\n");
-        sb.append("Посмотреть свои результаты за неделю `/stats week`\n");
         // Добавляем город если установлен
         appendCityInfo(sb, city);
         // Получаем текущие задачи для отображения счетчика
@@ -211,7 +221,7 @@ public class StatsCommand extends AbstractCommand {
         } else if (completionRate > 0) {
             return "🔥 Вы начали - это уже победа! Двигайтесь дальше!";
         } else {
-            return "🎯 Начните с добавления задач: /todo add <задача>";
+            return "🎯 Начните с добавления задач: `/todo add <задача>`";
         }
     }
 

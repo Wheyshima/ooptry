@@ -40,6 +40,22 @@
             <version>5.11.0</version>
             <scope>test</scope>
         </dependency>
+        <!-- Для fuzzy-поиска -->
+        <dependency>
+            <groupId>me.xdrop</groupId>
+            <artifactId>fuzzywuzzy</artifactId>
+            <version>1.4.0</version>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <version>2.15.2</version>
+        </dependency>
+        <dependency>
+            <groupId>org.jsoup</groupId>
+            <artifactId>jsoup</artifactId>
+            <version>1.16.1</version>
+        </dependency>
 
         <!-- Добавьте реализацию SLF4J, например: -->
 
@@ -79,6 +95,7 @@
             <artifactId>dotenv-java</artifactId>
             <version>${dotenv.version}</version>
         </dependency>
+
         <dependency>
             <groupId>org.telegram</groupId>
             <artifactId>telegrambots</artifactId>
@@ -94,25 +111,6 @@
             <artifactId>postgresql</artifactId>
             <version>${postgresql.version}</version>
         </dependency>
-        <dependency>
-            <groupId>com.squareup.okhttp3</groupId>
-            <artifactId>okhttp</artifactId>
-            <version>4.12.0</version>
-        </dependency>
-        <!-- JSON-парсер -->
-        <dependency>
-            <groupId>com.google.code.gson</groupId>
-            <artifactId>gson</artifactId>
-            <version>2.10.1</version>
-        </dependency>
-        <!-- HTTP-клиент -->
-        <dependency>
-            <groupId>com.squareup.okhttp3</groupId>
-            <artifactId>okhttp</artifactId>
-            <version>4.12.0</version>
-        </dependency>
-
-
     </dependencies>
 
     <build>
@@ -144,7 +142,7 @@
                 <version>${maven-checkstyle.version}</version>
                 <configuration>
                     <configLocation>google_checks.xml</configLocation>
-
+                    <encoding>UTF-8</encoding>
                     <consoleOutput>true</consoleOutput>
                     <failsOnError>false</failsOnError>
                     <linkXRef>false</linkXRef>

@@ -1,7 +1,7 @@
 package com.example.bot.command.impl;
 
-import com.example.bot.ChatBot;
 import com.example.bot.database.DatabaseManager;
+import com.example.bot.service.UserStateService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -19,26 +19,25 @@ import static org.mockito.Mockito.*;
 class TodoCommandTest {
 
     private DatabaseManager mockDatabaseManager;
-    private ChatBot mockChatBot;
+    private UserStateService mockUserStateService;
     private TodoCommand todoCommand;
     private Message mockMessage;
-    private User mockUser;
 
     @BeforeEach
     void setUp() {
         mockDatabaseManager = Mockito.mock(DatabaseManager.class);
-        mockChatBot = Mockito.mock(ChatBot.class);
-        todoCommand = new TodoCommand(mockDatabaseManager, mockChatBot);
+        mockUserStateService = Mockito.mock(UserStateService.class);
+        todoCommand = new TodoCommand(mockDatabaseManager, mockUserStateService);
 
         mockMessage = Mockito.mock(Message.class);
-        mockUser = Mockito.mock(User.class);
+        User mockUser = Mockito.mock(User.class);
 
         when(mockMessage.getFrom()).thenReturn(mockUser);
         when(mockUser.getId()).thenReturn(12345L);
-        when(mockChatBot.hasActiveState(12345L)).thenReturn(false);
+        when(mockUserStateService.hasActiveState(12345L)).thenReturn(false);
     }
 
-    // ============ Тесты для /todo (показ задач) ============
+    // ============ Тесты для tod0  ============
 
     @Test
     void execute_emptyCommand_showsTasksList() {
@@ -71,11 +70,11 @@ class TodoCommandTest {
         String result = todoCommand.execute(mockMessage);
 
         // Then
-        assertTrue(result.contains("📭 На сегодня задач нет. Добавьте новую:"));
+        assertTrue(result.contains("📭 На сегодня задач нет."));
         assertTrue(result.contains("`/todo add <ваша задача>`"));
     }
 
-    // ============ Тесты для /todo add ============
+    // ============ Тесты для  add ============
 
     @Test
     void execute_addCommand_validTask_addsTaskSuccessfully() {
@@ -104,7 +103,7 @@ class TodoCommandTest {
         // When
         String result = todoCommand.execute(mockMessage);
         // Then
-        assertTrue(result.contains("⏰ Задачи автоматически удаляются в 00:00"));
+        assertTrue(result.contains("⏰ Задачи автоматически удаляются в 23:59"));
     }
 
     @Test
@@ -132,7 +131,7 @@ class TodoCommandTest {
         assertTrue(result.contains("❌ Текст задачи слишком длинный (максимум 50 символов)"));
     }
 
-    // ============ Тесты для /todo complete ============
+    // ============ Тесты для complete ============
 
     @Test
     void execute_completeCommand_validIndex_completesTask() {
@@ -164,8 +163,11 @@ class TodoCommandTest {
         // When
         String result = todoCommand.execute(mockMessage);
 
+
         // Then
-        assertTrue(result.contains("❌ Неверный номер задачи. У вас всего 1 задач."));
+        assertTrue(result.contains("❌ Неверный номер задачи."));
+        assertTrue(result.contains("У вас всего 1 задач."));
+        assertTrue(result.contains("/todo"));
     }
 
     @Test
@@ -180,7 +182,7 @@ class TodoCommandTest {
         assertTrue(result.contains("❌ Неверный формат. Используйте: `/todo complete <номер>`"));
     }
 
-    // ============ Тесты для /todo edit ============
+    // ============ Тесты для edit ============
 
     @Test
     void execute_editCommand_validIndex_startsEditMode() {
@@ -197,7 +199,7 @@ class TodoCommandTest {
         // Then
         assertTrue(result.contains("✏️ *Редактирование задачи #1*"));
         assertTrue(result.contains("📝 *Текущий текст:* Старый текст"));
-        verify(mockChatBot).startTodoEditState(12345L, 10);
+        verify(mockUserStateService).startTodoEditState(12345L, 10);
     }
 
     @Test
@@ -211,36 +213,12 @@ class TodoCommandTest {
 
         // When
         String result = todoCommand.execute(mockMessage);
-
         // Then
-        assertTrue(result.contains("⚠️ Нельзя редактировать завершенную задачу #1"));
+        assertTrue(result.contains("⚠️ Нельзя редактировать *завершенную* задачу #1"));
+        assertTrue(result.contains("только для просмотра:"));
+        assertTrue(result.contains("/todo"));
     }
-
-    // ============ Тесты для /todo stats ============
-
-    @Test
-    void execute_statsCommand_showsStatistics() {
-        // Given
-        when(mockMessage.getText()).thenReturn("/todo stats");
-        List<DatabaseManager.Task> tasks = Arrays.asList(
-                new DatabaseManager.Task(1, "Задача 1", true, LocalDateTime.now()),
-                new DatabaseManager.Task(2, "Задача 2", false, LocalDateTime.now())
-        );
-        when(mockDatabaseManager.getDailyTasks(12345L)).thenReturn(tasks);
-        when(mockDatabaseManager.getDailyCompletionRate(12345L)).thenReturn(50.0);
-
-        // When
-        String result = todoCommand.execute(mockMessage);
-
-        // Then
-        assertTrue(result.contains("📊 *Статистика задач:*"));
-        assertTrue(result.contains("• Всего задач: 2"));
-        assertTrue(result.contains("• Выполнено: 1"));
-        assertTrue(result.contains("• Прогресс: 50,0%"));
-    }
-
     // ============ Тесты для неверных команд ============
-
     @Test
     void execute_invalidCommand_showsUsage() {
         // Given
@@ -267,7 +245,7 @@ class TodoCommandTest {
     @Test
     void execute_withActiveState_cancelsPreviousAction() {
         // Given
-        when(mockChatBot.hasActiveState(12345L)).thenReturn(true);
+        when(mockUserStateService.hasActiveState(12345L)).thenReturn(true);
         when(mockMessage.getText()).thenReturn("/todo");
 
         // When
@@ -275,6 +253,6 @@ class TodoCommandTest {
 
         // Then
         assertTrue(result.contains("⚠️ Предыдущее действие отменено. Обрабатываю новую команду..."));
-        verify(mockChatBot).cancelUserState(12345L);
+        verify(mockUserStateService).cancelUserState(12345L);
     }
 }

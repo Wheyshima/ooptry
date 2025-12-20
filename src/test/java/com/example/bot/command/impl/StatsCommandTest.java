@@ -21,7 +21,6 @@ class StatsCommandTest {
     private DatabaseManager mockDatabaseManager;
     private StatsCommand statsCommand;
     private Message mockMessage;
-    private User mockUser;
 
     @BeforeEach
     void setUp() {
@@ -29,7 +28,7 @@ class StatsCommandTest {
         mockDatabaseManager = Mockito.mock(DatabaseManager.class);
         statsCommand = new StatsCommand(mockDatabaseManager);
         mockMessage = Mockito.mock(Message.class);
-        mockUser = Mockito.mock(User.class);
+        User mockUser = Mockito.mock(User.class);
 
         when(mockMessage.getFrom()).thenReturn(mockUser);
         when(mockUser.getId()).thenReturn(12345L);
