@@ -15,6 +15,15 @@
         </configuration>
       </plugin>
       <plugin>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <version>${maven.surefire.plugin.version}</version>
+        <configuration>
+          <environmentVariables>
+            <DOCKER_HOST>npipe:////./pipe/docker_engine</DOCKER_HOST>
+          </environmentVariables>
+        </configuration>
+      </plugin>
+      <plugin>
         <artifactId>maven-checkstyle-plugin</artifactId>
         <version>${maven-checkstyle.version}</version>
         <executions>
@@ -28,7 +37,6 @@
         </executions>
         <configuration>
           <configLocation>google_checks.xml</configLocation>
-          <encoding>UTF-8</encoding>
           <consoleOutput>true</consoleOutput>
           <failsOnError>false</failsOnError>
           <linkXRef>false</linkXRef>
@@ -153,6 +161,7 @@
     <postgresql.version>42.6.0</postgresql.version>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <maven-checkstyle.version>3.3.0</maven-checkstyle.version>
+    <maven.surefire.plugin.version>3.2.5</maven.surefire.plugin.version>
     <dotenv.version>3.0.0</dotenv.version>
   </properties>
 </project>

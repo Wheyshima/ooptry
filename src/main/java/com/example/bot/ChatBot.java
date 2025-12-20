@@ -3,34 +3,55 @@ package com.example.bot;
 import com.example.bot.command.CommandRegistry;
 import com.example.bot.command.impl.*;
 import com.example.bot.database.DatabaseManager;
+import com.google.gson.JsonArray;
 import org.telegram.telegrambots.bots.TelegramLongPollingBot;
 import org.telegram.telegrambots.meta.api.methods.commands.SetMyCommands;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
 import org.telegram.telegrambots.meta.api.objects.Update;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+
+import java.time.*;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.time.temporal.ChronoUnit;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.Response;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.stream.Collectors;
-import java.time.*;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.concurrent.TimeUnit;
 import com.example.bot.database.DatabaseManager.UserWithCity;
 
-
+@SuppressWarnings("deprecation")
 public class ChatBot extends TelegramLongPollingBot {
+    private static final Logger logger = LoggerFactory.getLogger(ChatBot.class);
     private final String botUsername;
     private final String botToken;
     private final CommandRegistry commandRegistry;
     private final DatabaseManager databaseManager;
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(2);
 
-    private final Map<Long, UserState> userStates = new HashMap<>();
+    private final Map<Long, UserState> userStates = new ConcurrentHashMap<>();
+    private final Map<Long, Long> editStartTimes = new ConcurrentHashMap<>();
     private final TodoCommand todoCommand;
+
+
+    private static final long EDIT_TIMEOUT_MS = 10000; // 10 секунд таймаут
+    private static final long CLEANUP_INITIAL_DELAY_MINUTES = 1;
+    private static final long CLEANUP_PERIOD_MINUTES = 1;
+    private static final String WEATHER_API_KEY = "b3d108dc2567f3da1587c2d2392be91d";
+    private static final OkHttpClient httpClient = new OkHttpClient();
 
     public ChatBot(String botUsername, String botToken, DatabaseManager databaseManager) {
         this.botUsername = botUsername;
@@ -43,111 +64,185 @@ public class ChatBot extends TelegramLongPollingBot {
         registerBotCommands();
         cleanupOnStartup();
         startDailyCleanupTask();
+        startEditTimeoutCleanup();
         scheduleMorningWeather();
     }
-
     private void scheduleMorningWeather() {
-        // Рассчитываем, сколько ждать до 7:00
         LocalTime now = LocalTime.now();
-        LocalTime target = LocalTime.of(2, 52);
+        LocalTime target = LocalTime.of(18, 21); // 7:00 утра каждый день
         long initialDelayMinutes;
 
         if (now.isBefore(target)) {
             initialDelayMinutes = now.until(target, ChronoUnit.MINUTES);
         } else {
-            // Уже прошли 7:00 — ждём до завтра
             initialDelayMinutes = now.until(target.plusHours(24), ChronoUnit.MINUTES);
         }
 
         scheduler.scheduleAtFixedRate(
                 this::sendMorningWeather,
                 initialDelayMinutes,
-                24 * 60, // повтор каждые 24 часа
+                24 * 60,
                 TimeUnit.MINUTES
         );
+        logger.info("⏰ Утренняя погодная рассылка запланирована на {} (через {} мин)", target, initialDelayMinutes);
     }
 
     private void sendMorningWeather() {
         try {
-            // 1. Получаем всех пользователей с городами
-            List<DatabaseManager.UserWithCity> usersWithCity = databaseManager.getAllUsersWithCities();
-            for (DatabaseManager.UserWithCity user : usersWithCity) {
-                String weatherReport = buildWeatherReport(user.city());
-                execute(SendMessage.builder()
-                        .chatId(user.userId())
-                        .text(weatherReport)
-                        .build());
+            logger.info("🌤 Запуск утренней погодной рассылки");
+
+            // 1. Пользователи с городами
+            List<UserWithCity> usersWithCity = databaseManager.getAllUsersWithCities();
+            logger.debug("Найдено {} пользователей с городом", usersWithCity.size());
+
+            for (UserWithCity user : usersWithCity) {
+                try {
+                    String weatherReport = buildWeatherReport(user.city());
+                    execute(SendMessage.builder()
+                            .chatId(user.userId())
+                            .text(weatherReport)
+                            .parseMode("HTML") // важно: HTML для <b>
+                            .build());
+                } catch (Exception e) {
+                    logger.error("Ошибка отправки погоды пользователю {}", user.userId(), e);
+                }
             }
-            // 2. Получаем ВСЕХ пользователей (или только тех, кто писал боту)
+
+            // 2. Все пользователи
             Set<Long> allUserIds = new HashSet<>(databaseManager.getAllUserIds());
             Set<Long> usersWithCitySet = usersWithCity.stream()
                     .map(UserWithCity::userId)
                     .collect(Collectors.toSet());
 
-            // 3. Отправляем напоминание тем, у кого нет города
+            // 3. Напоминания тем, у кого нет города
+            int remindersSent = 0;
             for (Long userId : allUserIds) {
                 if (!usersWithCitySet.contains(userId)) {
-                    execute(SendMessage.builder()
-                            .chatId(userId)
-                            .text("🌤 Укажите ваш город для утренней сводки погоды!\nПример: /setcity Москва")
-                            .build());
+                    try {
+                        execute(SendMessage.builder()
+                                .chatId(userId)
+                                .text("🌤 Укажите ваш город для утренней сводки погоды!\nПример: /setcity Москва")
+                                .parseMode("Markdown")
+                                .build());
+                        remindersSent++;
+                    } catch (Exception e) {
+                        logger.error("Ошибка отправки напоминания пользователю {}", userId, e);
+                    }
                 }
             }
 
+            logger.info("Утренняя рассылка завершена: {} погодных сводок, {} напоминаний",
+                    usersWithCity.size(), remindersSent);
+
         } catch (Exception e) {
-            e.printStackTrace();
+            logger.error("Критическая ошибка в утренней рассылке", e);
         }
     }
     private String buildWeatherReport(String city) {
         try {
-            // Пример: запрос к OpenWeather API (Current или Forecast)
-            // Формат: "🌤 Погода в Москве на сегодня:\nУтро: +10°C, ☀️\nДень: +15°C, ⛅\n..."
+            if (city == null || city.trim().isEmpty()) {
+                return "❌ Сначала укажите город через /setcity";
+            }
 
-            // На первом этапе можно просто заглушку:
-            return String.format("🌤 Погода в %s на сегодня:\nУтро: ...\nДень: ...\nВечер: ...\nНочь: ...", city);
+            String cleanCity = city.trim();
+            String encodedCity = URLEncoder.encode(cleanCity, StandardCharsets.UTF_8);
+            String geocodeUrl = "http://api.openweathermap.org/geo/1.0/direct?q=" + encodedCity + "&limit=1&appid=" + WEATHER_API_KEY;
 
+            // === Шаг 1: Проверяем, существует ли город ===
+            Request geoRequest = new Request.Builder().url(geocodeUrl).build();
+            try (Response geoResponse = httpClient.newCall(geoRequest).execute()) {
+                String geoBody = geoResponse.body().string();
+                if (!geoResponse.isSuccessful() || geoBody.trim().equals("[]")) {
+                    return "❌ Город \"" + cleanCity + "\" не найден.\nПопробуйте: /setcity Moscow или /setcity Москва,RU";
+                }
+
+                JsonArray geoArray = JsonParser.parseString(geoBody).getAsJsonArray();
+                if (geoArray.isEmpty()) {
+                    return "❌ Город не найден: \"" + cleanCity + "\"";
+                }
+
+                JsonObject loc = geoArray.get(0).getAsJsonObject();
+                double lat = loc.get("lat").getAsDouble();
+                double lon = loc.get("lon").getAsDouble();
+                String resolvedCity = loc.has("local_names") && loc.getAsJsonObject("local_names").has("ru")
+                        ? loc.getAsJsonObject("local_names").get("ru").getAsString()
+                        : loc.get("name").getAsString();
+
+                // === Шаг 2: Получаем текущую погоду через forecast (первый элемент = сейчас) ===
+                String forecastUrl = "https://api.openweathermap.org/data/2.5/forecast?" +
+                        "lat=" + lat + "&lon=" + lon +
+                        "&units=metric&lang=ru&appid=" + WEATHER_API_KEY;
+
+                Request forecastRequest = new Request.Builder().url(forecastUrl).build();
+                try (Response forecastResponse = httpClient.newCall(forecastRequest).execute()) {
+                    if (!forecastResponse.isSuccessful()) {
+                        return "❌ Ошибка загрузки погоды для " + resolvedCity;
+                    }
+
+                    JsonObject root = JsonParser.parseString(forecastResponse.body().string()).getAsJsonObject();
+                    JsonArray list = root.getAsJsonArray("list");
+                    if (list.isEmpty()) {
+                        return "🌤 Погода в " + resolvedCity + " недоступна";
+                    }
+
+                    JsonObject current = list.get(0).getAsJsonObject();
+                    double temp = current.getAsJsonObject("main").get("temp").getAsDouble();
+                    String desc = current.getAsJsonArray("weather").get(0)
+                            .getAsJsonObject().get("description").getAsString();
+
+                    return String.format(
+                            "<b>Погода в %s сейчас</b>\n" +
+                                    "<b>Температура:</b> %.1f°C\n" +
+                                    "<b>Описание:</b> %s",
+                            resolvedCity, temp, desc
+                    );
+                }
+            }
         } catch (Exception e) {
-            return "❌ Не удалось загрузить погоду для " + city + ". Попробуйте позже.";
+            logger.error("Ошибка погоды для города: " + city, e);
+            return "⚠️ Не удалось загрузить погоду. Попробуйте позже.";
         }
     }
 
 
-            private void cleanupOnStartup() {
-        try {
-            System.out.println("🔍 Проверка устаревших задач при запуске...");
 
-            // Используем публичные методы DatabaseManager
+    private void cleanupOnStartup() {
+        try {
+            logger.info(" Проверка устаревших задач при запуске...");
             DatabaseManager.TaskStats stats = databaseManager.getTaskStats();
 
             if (stats.oldTasks > 0) {
-                System.out.println("🗑️ Найдено " + stats.oldTasks + " задач предыдущих дней, очищаем...");
-                databaseManager.cleanupExpiredDailyTasks();
+                logger.info("🗑️ Найдено {} задач предыдущих дней, очищаем...", stats.oldTasks);
+                performCleanupOperations();
             } else {
-                System.out.println("✅ Нет устаревших задач для очистки");
+                logger.info(" Нет устаревших задач для очистки");
             }
 
-            System.out.println("📅 Сегодняшних задач: " + stats.todayTasks);
+            logger.info(" Сегодняшних задач: {}", stats.todayTasks);
 
         } catch (Exception e) {
-            System.err.println("  Ошибка при очистке при запуске: " + e.getMessage());
+            logger.error(" Ошибка при очистке при запуске:", e);
         }
     }
 
+    private void performCleanupOperations() {
+        databaseManager.cleanupOldProductivityStats();
+        databaseManager.saveAllUsersProductivityStats();
+        databaseManager.cleanupAllDailyTasks();
+        databaseManager.cleanupUnlockedWishes();
+    }
+
     private void initializeCommands() {
-        CommandRegistry registry = this.commandRegistry;
+        commandRegistry.registerCommand(new StartCommand());
+        commandRegistry.registerCommand(new SetCityCommand(databaseManager));
+        commandRegistry.registerCommand(todoCommand);
+        commandRegistry.registerCommand(new WishlistCommand(databaseManager));
+        commandRegistry.registerCommand(new StatsCommand(databaseManager));
+        commandRegistry.registerCommand(new AboutCommand());
+        commandRegistry.registerCommand(new AuthorsCommand());
+        commandRegistry.registerCommand(new HelpCommand(commandRegistry));
 
-        registry.registerCommand(new StartCommand());
-        registry.registerCommand(new AboutCommand());
-        registry.registerCommand(new AuthorsCommand());
-
-        registry.registerCommand(new SetCityCommand(databaseManager));
-        registry.registerCommand(todoCommand);
-        registry.registerCommand(new WishlistCommand(databaseManager));
-        registry.registerCommand(new StatsCommand(databaseManager));
-        registry.registerCommand(new CleanupCommand(databaseManager));
-        registry.registerCommand(new ResetWishlistCommand(databaseManager));
-
-        registry.registerCommand(new HelpCommand(registry));
+        logger.info(" Инициализировано {} команд", commandRegistry.getCommandCount());
     }
 
     private void registerBotCommands() {
@@ -155,28 +250,39 @@ public class ChatBot extends TelegramLongPollingBot {
             execute(SetMyCommands.builder()
                     .commands(commandRegistry.getBotCommands())
                     .build());
+            logger.info(" Команды бота успешно зарегистрированы в меню");
         } catch (TelegramApiException e) {
-            System.err.println("Ошибка при регистрации команд меню: " + e.getMessage());
+            logger.error(" Ошибка при регистрации команд меню", e);
         }
     }
 
     private void startDailyCleanupTask() {
         ZoneId utcPlusTwo = ZoneId.of("Asia/Yekaterinburg");
-
         ZonedDateTime nowInUtcPlusTwo = ZonedDateTime.now(utcPlusTwo);
-        ZonedDateTime nextMidnight = nowInUtcPlusTwo.toLocalDate()
-                .plusDays(1)
-                .atStartOfDay(utcPlusTwo);
+        // Устанавливаем очистку на 23:59 сегодня или завтра, если время уже прошло
+        ZonedDateTime nextCleanup = nowInUtcPlusTwo.toLocalDate()
+                .atTime(23, 59)
+                .atZone(utcPlusTwo);
 
-        long initialDelay = Duration.between(nowInUtcPlusTwo, nextMidnight).getSeconds();
+        if (nowInUtcPlusTwo.isAfter(nextCleanup)) {
+            nextCleanup = nextCleanup.plusDays(1);
+        }
 
-        // Детальная информация о времени
-        System.out.println("⏰ Настройка ежедневной очистки:");
-        System.out.println("   Текущее время сервера: " + LocalDateTime.now());
-        System.out.println("   Текущее время UTC+5: " + nowInUtcPlusTwo);
-        System.out.println("   Следующая очистка: " + nextMidnight);
-        System.out.println("   Задержка до очистки: " + initialDelay + " секунд (" +
-                String.format("%.2f часов", initialDelay / 3600.0) + ")");
+        long initialDelay = Duration.between(nowInUtcPlusTwo, nextCleanup).getSeconds();
+
+        logger.info("""
+            ⏰ Настройка ежедневной очистки:
+               Текущее время сервера: {}
+               Текущее время UTC+5: {}
+               Следующая очистка: {}
+               Задержка до очистки: {} секунд ({} часов)""",
+            LocalDateTime.now(),
+            nowInUtcPlusTwo,
+            nextCleanup,
+            initialDelay,
+            String.format("%.2f", initialDelay / 3600.0));
+
+
 
         scheduler.scheduleAtFixedRate(
                 this::performDailyCleanup,
@@ -190,48 +296,89 @@ public class ChatBot extends TelegramLongPollingBot {
         try {
             ZoneId utcPlusTwo = ZoneId.of("Asia/Yekaterinburg");
             ZonedDateTime cleanupTime = ZonedDateTime.now(utcPlusTwo);
-            System.out.println("🔄 Запуск ежедневной очистки задач в " + cleanupTime + " (UTC+5)");
+            logger.info(" Запуск ежедневной очистки задач в {} (UTC+5)", cleanupTime);
+            performCleanupOperations();
 
-            // 1. Сохраняем статистику продуктивности ВСЕХ активных пользователей
-            databaseManager.saveAllUsersProductivityStats();
-            // Получим статистику ДО очистки
             DatabaseManager.TaskStats stats = databaseManager.getTaskStats();
-            System.out.println("📊 До очистки: " +
-                    stats.totalTasks + " всего, " +
-                    stats.oldTasks + " устаревших, " +
-                    stats.todayTasks + " сегодняшних");
+            logger.info(" До очистки: {} всего, {} устаревших, {} сегодняшних",
+                    stats.totalTasks, stats.oldTasks, stats.todayTasks);
 
-            // Выполнить очистку (удалит только старые задачи)
-            databaseManager.cleanupExpiredDailyTasks();
-
-            // Очистка НЕзаблокированных желаний (НОВАЯ ФУНКЦИЯ)
-            databaseManager.cleanupUnlockedWishes();
-
-            // Очистка устаревших ЗАБЛОКИРОВАННЫХ желаний
-            databaseManager.cleanupExpiredWishes();
-
-            // Проверим результат после очистки
             int todayTasksAfter = databaseManager.getTodayTasksCount();
-            System.out.println("📊 После очистки: " + todayTasksAfter + " сегодняшних задач сохранено");
-
-            System.out.println("✅ Ежедневная очистка завершена");
+            logger.info(" После очистки: {} сегодняшних задач сохранено", todayTasksAfter);
+            logger.info(" Ежедневная очистка завершена");
 
         } catch (Exception e) {
-            System.err.println("  Ошибка при ежедневной очистке: " + e.getMessage());
-            e.printStackTrace();
+            logger.error(" Ошибка при ежедневной очистке", e);
         }
+    }
+
+    /**
+     * Запускает периодическую очистку устаревших состояний редактирования
+     */
+    private void startEditTimeoutCleanup() {
+        scheduler.scheduleAtFixedRate(
+                this::cleanupExpiredEditStates,
+                CLEANUP_INITIAL_DELAY_MINUTES,
+                CLEANUP_PERIOD_MINUTES,
+                TimeUnit.MINUTES
+        );
+        logger.debug("Запущена периодическая очистка устаревших состояний редактирования");
+    }
+
+    /**
+     * Очищает устаревшие состояния редактирования
+     */
+    private void cleanupExpiredEditStates() {
+        long currentTime = System.currentTimeMillis();
+
+        editStartTimes.entrySet().removeIf(entry -> {
+            Long userId = entry.getKey();
+            Long startTime = entry.getValue();
+
+            if (startTime != null && (currentTime - startTime) > EDIT_TIMEOUT_MS) {
+                cleanupEditState(userId);
+                sendTimeoutNotification(userId);
+                return true;
+            }
+            return false;
+        });
+    }
+
+    /**
+     * Отправляет уведомление о таймауте пользователю
+     */
+    private void sendTimeoutNotification(Long userId) {
+        String message = """
+        ⏰ *Время редактирования истекло*
+        
+        Редактирование задачи автоматически отменено через 5 секунд бездействия.
+        Для повторного редактирования используйте команду `/todo edit` с нужным ID задачи.""";
+
+        SendMessage timeoutMessage = SendMessage.builder()
+                .chatId(userId.toString())
+                .text(message)
+                .parseMode("Markdown")
+                .build();
+
+        try {
+            execute(timeoutMessage);
+        } catch (TelegramApiException e) {
+            logger.error("Ошибка при отправке уведомления о таймауте пользователю {}", userId, e);        }
     }
 
     @Override
     public void onClosing() {
+        logger.info("Завершение работы бота...");
         scheduler.shutdown();
         try {
             if (!scheduler.awaitTermination(5, TimeUnit.SECONDS)) {
                 scheduler.shutdownNow();
+                logger.warn("Принудительное завершение планировщика");
             }
         } catch (InterruptedException e) {
             scheduler.shutdownNow();
             Thread.currentThread().interrupt();
+            logger.warn("Поток был прерван при завершении работы");
         }
         super.onClosing();
     }
@@ -248,10 +395,14 @@ public class ChatBot extends TelegramLongPollingBot {
             Long userId = message.getFrom().getId();
             String text = message.getText();
 
-            databaseManager.saveUser(
-                    message.getFrom().getId(),
-                    message.getFrom().getUserName()
-            );
+            databaseManager.saveUser(userId, message.getFrom().getUserName());
+
+            // Проверяем таймаут перед обработкой состояния
+            if (userStates.containsKey(userId) && isEditTimedOut(userId)) {
+                cleanupEditState(userId);
+                sendTimeoutMessage(message.getChatId());
+                return;
+            }
 
             if (userStates.containsKey(userId)) {
                 handleUserState(userId, text, message);
@@ -269,49 +420,58 @@ public class ChatBot extends TelegramLongPollingBot {
             }
 
         } catch (Exception e) {
-            System.err.println("Ошибка обработки сообщения: " + e.getMessage());
-            e.printStackTrace();
+            logger.error("Ошибка обработки сообщения от пользователя {}", message.getFrom().getId(), e);
             sendResponse(message.getChatId(), "Произошла ошибка при обработке команды.");
         }
+    }
+
+    private void sendTimeoutMessage(Long chatId) {
+        sendResponse(chatId, """
+        ⏰ *Время редактирования истекло*
+        
+        Редактирование задачи автоматически отменено через 5 секунд бездействия.
+        Для повторного редактирования используйте команду `/todo edit` с нужным ID задачи.""");
     }
 
     private void handleUserState(Long userId, String text, org.telegram.telegrambots.meta.api.objects.Message message) {
         UserState state = userStates.get(userId);
 
-        if (text.equalsIgnoreCase("отмена") || text.equalsIgnoreCase("cancel")) {
-            userStates.remove(userId);
-            sendResponse(message.getChatId(), "  Действие отменено.");
+        if (isCancelCommand(text)) {
+            cleanupEditState(userId);
+            sendResponse(message.getChatId(), " Действие отменено.");
             return;
         }
 
         try {
-            String response;
-            switch (state.getType()) {
-                case EDITING_TODO_TASK:
-                    response = todoCommand.handleEditInput(userId, state.getTaskId(), text);
-                    break;
-                case SETTING_CITY:
-                    response = "  Функция установки города временно недоступна.";
-                    break;
-                default:
-                    response = "  Неизвестное состояние. Действие отменено.";
-            }
-
-            userStates.remove(userId);
+            String response = processUserState(userId, text, state);
             sendResponse(message.getChatId(), response);
 
         } catch (Exception e) {
-            System.err.println("Ошибка при обработке состояния пользователя: " + e.getMessage());
-            e.printStackTrace();
-            userStates.remove(userId);
-            sendResponse(message.getChatId(), "  Произошла ошибка при обработке. Состояние сброшено.");
+            logger.error("Ошибка при обработке состояния пользователя {}", userId, e);
+            cleanupEditState(userId);
+            sendResponse(message.getChatId(), " Произошла ошибка при обработке. Состояние сброшено.");
         }
     }
-///
 
-///
+    private boolean isCancelCommand(String text) {
+        return text.equalsIgnoreCase("отмена") || text.equalsIgnoreCase("cancel");
+    }
+
+    private String processUserState(Long userId, String text, UserState state) {
+        cleanupEditState(userId); // Всегда очищаем состояние после обработки
+
+        return switch (state.getType()) {
+            case EDITING_TODO_TASK -> todoCommand.handleEditInput(userId, state.getTaskId(), text);
+            case SETTING_CITY -> " Функция установки города временно недоступна.";
+        };
+    }
+
+    /**
+     * Запускает состояние редактирования задачи с отслеживанием времени
+     */
     public void startTodoEditState(Long userId, int taskId) {
         userStates.put(userId, new UserState(StateType.EDITING_TODO_TASK, taskId));
+        editStartTimes.put(userId, System.currentTimeMillis());
     }
 
     public boolean hasActiveState(Long userId) {
@@ -319,10 +479,21 @@ public class ChatBot extends TelegramLongPollingBot {
     }
 
     public void cancelUserState(Long userId) {
-        userStates.remove(userId);
+        cleanupEditState(userId);
     }
 
+    public boolean isEditTimedOut(Long userId) {
+        Long startTime = editStartTimes.get(userId);
+        if (startTime == null) return true;
 
+        long elapsed = System.currentTimeMillis() - startTime;
+        return elapsed > EDIT_TIMEOUT_MS;
+    }
+
+    public void cleanupEditState(Long userId) {
+        userStates.remove(userId);
+        editStartTimes.remove(userId);
+    }
 
     private void sendResponse(Long chatId, String text) {
         SendMessage message = SendMessage.builder()
@@ -334,7 +505,7 @@ public class ChatBot extends TelegramLongPollingBot {
         try {
             execute(message);
         } catch (TelegramApiException e) {
-            System.err.println("Ошибка при отправке сообщения: " + e.getMessage());
+            logger.error("Ошибка при отправке сообщения в чат {}", chatId, e);
         }
     }
 

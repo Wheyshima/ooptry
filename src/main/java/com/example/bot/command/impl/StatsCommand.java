@@ -5,6 +5,7 @@ import com.example.bot.database.DatabaseManager;
 import org.telegram.telegrambots.meta.api.objects.Message;
 
 import java.util.List;
+import java.time.LocalDate;
 
 public class StatsCommand extends AbstractCommand {
     private final DatabaseManager databaseManager;
@@ -28,9 +29,10 @@ public class StatsCommand extends AbstractCommand {
         
         *📊 Что показывает:*
         • Текущий прогресс за сегодня
-        • город (если он установлен)
+        • Город (если он установлен)
         • Сохраненную статистику
         • Среднюю продуктивность за неделю
+        • Детальную статистику по дням
         • Мотивационные сообщения
         """;
     }
@@ -40,14 +42,19 @@ public class StatsCommand extends AbstractCommand {
         Long userId = message.getFrom().getId();
         String argument = getCommandArgument(message).trim().toLowerCase();
 
-        // Сохраняем текущую статистику перед показом
-        saveCurrentStats(userId);
-
-        if (argument.equals("week") || argument.equals("неделя")) {
-            return showWeeklyStats(userId);
-        } else {
-            return showTodayStats(userId);
-        }
+        return switch (argument) {
+            case "week", "неделя" -> showWeeklyStats(userId);
+            case "" -> showTodayStats(userId); // Пустой аргумент - статистика за сегодня
+            default -> """
+            ❓ *Неизвестный параметр:* '%s'
+            
+            %s
+            
+            💡 *Доступные варианты:*
+            `/stats` - статистика за сегодня
+            `/stats week` - статистика за неделю
+            """.formatted(argument, showTodayStats(userId)); // Неизвестный аргумент - показываем помощь
+        };
     }
 
     private String showTodayStats(Long userId) {
@@ -56,82 +63,131 @@ public class StatsCommand extends AbstractCommand {
         String city = databaseManager.getUserCity(userId);
 
         StringBuilder sb = new StringBuilder("*📊 Статистика за сегодня:*\n\n");
-
+        sb.append("Посмотреть свои результаты за неделю `/stats week`\n");
         // Добавляем город если установлен
-        if (city != null && !city.trim().isEmpty()) {
-            sb.append(String.format("🏙️ *Город:* %s\n", city));
-        }
-
+        appendCityInfo(sb, city);
         // Получаем текущие задачи для отображения счетчика
         var tasks = databaseManager.getDailyTasks(userId);
         int totalTasks = tasks.size();
-        int completedTasks = (int) tasks.stream().filter(task -> task.isCompleted()).count();
+        int completedTasks = (int) tasks.stream().filter(DatabaseManager.Task::isCompleted).count();
 
-        sb.append(String.format("✅ *Выполнено:* %d/%d задач\n", completedTasks, totalTasks));
-        sb.append(String.format("📈 *Продуктивность:* %.1f%%\n", currentCompletionRate));
+        // Если задач нет, но есть сохраненная статистика - показываем её
+        if (totalTasks == 0 && savedCompletionRate != null) {
+            sb.append("""
+                ✅ *Выполнено:* 0/0 задач
+                📈 *Сохраненная продуктивность:* %.1f%%
+                💡 *Задачи очищены, прогресс сохранен*
+                
+                """.formatted(savedCompletionRate));
+        } else {
+            // Есть задачи - показываем текущий прогресс
+            sb.append("""
+                ✅ *Выполнено:* %d/%d задач
+                📈 *Продуктивность:* %.1f%%
+                """.formatted(completedTasks, totalTasks, currentCompletionRate));
+
+            // И сохраняем статистику только если есть задачи
+            if (!Double.isNaN(currentCompletionRate)) {
+                databaseManager.saveProductivityStats(userId, completedTasks, totalTasks);
+            }
+        }
 
         // Показываем сохраненную статистику если она есть
         if (savedCompletionRate != null) {
-            sb.append(String.format("💾 *Сохраненная:* %.1f%%\n\n", savedCompletionRate));
+            sb.append("💾 *Сохраненная:* %.1f%%\n\n".formatted(savedCompletionRate));
         } else {
             sb.append("\n");
         }
 
-        sb.append(getMotivationalMessage(currentCompletionRate));
+        // Используем сохраненную статистику для мотивационного сообщения если задач нет
+        double motivationRate = (totalTasks == 0 && savedCompletionRate != null) ? savedCompletionRate : currentCompletionRate;
+        sb.append(getMotivationalMessage(motivationRate));
 
         return sb.toString();
     }
 
     private String showWeeklyStats(Long userId) {
-        List<Double> weeklyStats = databaseManager.getWeeklyStats(userId);
+        // Получаем статистику ТОЛЬКО за текущую календарную неделю (Пн–Вс)
+        List<DatabaseManager.ProductivityStat> weeklyStats = databaseManager.getWeeklyProductivityStats(userId);
         String city = databaseManager.getUserCity(userId);
 
         if (weeklyStats.isEmpty()) {
-            return "📊 *Статистика за неделю:*\n\nНет данных за последние 7 дней";
+            return """
+                📊 *Статистика за неделю:*
+                
+                Нет данных за текущую неделю (понедельник–воскресенье)
+                
+                💡 *Совет:* Добавьте задачи с помощью `/todo add` и завершите день — статистика сохранится автоматически!
+                """;
         }
 
         StringBuilder sb = new StringBuilder("*📊 Статистика за неделю:*\n\n");
-        // Добавляем город если установлен
+
+        // Город
         if (city != null && !city.trim().isEmpty()) {
-            sb.append(String.format("🏙️ *Город:* %s\n\n", city));
+            sb.append("🏙️ *Город:* ").append(city).append("\n");
         }
 
-        // Рассчитываем среднюю продуктивность
+        // Средняя продуктивность
         double avgCompletion = weeklyStats.stream()
-                .mapToDouble(Double::doubleValue)
+                .mapToDouble(DatabaseManager.ProductivityStat::getCompletionRate)
                 .average()
                 .orElse(0.0);
 
         int activeDays = weeklyStats.size();
+        sb.append("""
+            📅 *Активных дней:* %d/7
+            📈 *Средняя продуктивность:* %.1f%%
+            
+            """.formatted(activeDays, avgCompletion));
 
-        sb.append(String.format("📅 *Активных дней:* %d/7\n", activeDays));
-        sb.append(String.format("📈 *Средняя продуктивность:* %.1f%%\n\n", avgCompletion));
-
-        // Показываем прогресс-бар недели
-        sb.append(getWeeklyProgressBar(weeklyStats));
+        // Детальная статистика по дням
+        sb.append(getDetailedWeeklyStatsFromProductivity(weeklyStats));
         sb.append("\n");
-
         sb.append(getWeeklyMotivationalMessage(avgCompletion));
 
         return sb.toString();
     }
 
-    /**
-     * Создает текстовый прогресс-бар для недельной статистики
-     */
-    private String getWeeklyProgressBar(List<Double> weeklyStats) {
-        StringBuilder progressBar = new StringBuilder();
-        String[] dayNames = {"Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"};
+    private String getDetailedWeeklyStatsFromProductivity(List<DatabaseManager.ProductivityStat> stats) {
+        StringBuilder sb = new StringBuilder("📋 *Детальная статистика по дням:*\n\n");
 
-        progressBar.append("📅 *Прогресс за неделю:*\n");
+        String[] dayNames = {"Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье"};
 
-        for (int i = 0; i < Math.min(7, weeklyStats.size()); i++) {
-            double completion = weeklyStats.get(i);
-            String emoji = getCompletionEmoji(completion);
-            progressBar.append(String.format("%s %s: %.1f%%\n", emoji, dayNames[i], completion));
+        for (DatabaseManager.ProductivityStat stat : stats) {
+            LocalDate date = stat.getStatDate();
+            String dayName = dayNames[date.getDayOfWeek().getValue() - 1];
+            String emoji = getCompletionEmoji(stat.getCompletionRate());
+
+            sb.append(String.format("%s *%s* (%.1f%%)\n", emoji, dayName, stat.getCompletionRate()));
+            sb.append(String.format("   📝 Задач: %d/%d выполнено\n", stat.getCompletedTasks(), stat.getTotalTasks()));
+            sb.append(String.format("   📅 Дата: %s\n\n", date));
         }
 
-        return progressBar.toString();
+        // Диапазон недели
+        if (!stats.isEmpty()) {
+            LocalDate weekStart = stats.getFirst().getStatDate().minusDays(stats.getFirst().getStatDate().getDayOfWeek().getValue() - 1);
+            LocalDate weekEnd = weekStart.plusDays(6);
+            sb.append(String.format("🗓️ *Неделя: %s – %s*\n", weekStart, weekEnd));
+        }
+
+        return sb.toString();
+    }
+
+    /**
+     * Добавляет информацию о городе в StringBuilder
+     */
+    private void appendCityInfo(StringBuilder sb, String city) {
+        if (isValidCity(city)) {
+            sb.append("🏙️ *Город:* ").append(city).append("\n");
+        }
+    }
+
+    /**
+     * Проверяет валидность города
+     */
+    private boolean isValidCity(String city) {
+        return city != null && !city.trim().isEmpty();
     }
 
     /**
@@ -143,21 +199,6 @@ public class StatsCommand extends AbstractCommand {
         else if (completion >= 50) return "🟠";
         else if (completion > 0) return "🔴";
         else return "⚫";
-    }
-
-    /**
-     * Сохраняет текущую статистику в базу данных
-     */
-    private void saveCurrentStats(Long userId) {
-        try {
-            double completionRate = databaseManager.getDailyCompletionRate(userId);
-            // Сохраняем только если есть задачи (не NaN)
-            if (!Double.isNaN(completionRate)) {
-                databaseManager.saveProductivityStats(userId, completionRate);
-            }
-        } catch (Exception e) {
-            System.err.println("❌ Ошибка при сохранении статистики для пользователя " + userId + ": " + e.getMessage());
-        }
     }
 
     private String getMotivationalMessage(double completionRate) {

@@ -1,5 +1,13 @@
 com\example\bot\command\impl\AuthorsCommandTest.class
 com\example\bot\ChatBotTest.class
+com\example\bot\database\DatabaseManagerIntegrationTest.class
+com\example\bot\command\AbstractCommandTest$TestCommand.class
+com\example\bot\command\AbstractCommandTest.class
+com\example\bot\command\impl\SetCityCommandTest.class
 com\example\bot\command\impl\AboutCommandTest.class
-com\example\bot\command\impl\HelpCommandTest.class
+com\example\bot\command\impl\StatsCommandTest.class
+com\example\bot\command\CommandRegistryTest.class
+com\example\bot\command\impl\WishlistCommandTest.class
 com\example\bot\command\impl\StartCommandTest.class
+com\example\bot\command\impl\TodoCommandTest.class
+com\example\bot\command\impl\HelpCommandTest.class

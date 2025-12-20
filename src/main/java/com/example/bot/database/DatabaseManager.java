@@ -1,10 +1,7 @@
 package com.example.bot.database;
-
 import java.sql.*;
 import java.time.LocalDateTime;
 import java.time.LocalDate;
-import java.util.Map;
-import java.util.HashMap;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -14,6 +11,88 @@ public class DatabaseManager {
     private final String password;
     public static final int WISHLIST_LOCK_DAYS = 60;
     public record UserWithCity(long userId, String city) {} // DTO
+
+    public static class Task {
+        private final int id;
+        private final String text;
+        private final boolean completed;
+        private final LocalDateTime createdAt;
+
+        public Task(int id, String text, boolean completed, LocalDateTime createdAt) {
+            this.id = id;
+            this.text = text;
+            this.completed = completed;
+            this.createdAt = createdAt;
+        }
+
+        public int getId() { return id; }
+        public String getText() { return text; }
+        public boolean isCompleted() { return completed; }
+        public LocalDateTime getCreatedAt() { return createdAt; }
+    }
+    public static class Wish {
+        private final int id;
+        private final String text;
+        private final boolean completed;
+        private final LocalDateTime createdAt;
+
+        public Wish(int id, String text, boolean completed, LocalDateTime createdAt) {
+            this.id = id;
+            this.text = text;
+            this.completed = completed;
+            this.createdAt = createdAt;
+        }
+
+        public int getId() { return id; }
+        public String getText() { return text; }
+        public boolean isCompleted() { return completed; }
+        public LocalDateTime getCreatedAt() { return createdAt; }
+    }
+
+    /**
+     * Класс для хранения ежедневной статистики продуктивности
+     */
+    public static class ProductivityStat {
+        public final double completionRate;
+        public final LocalDate statDate;
+        public final LocalDateTime createdAt;
+        public final int totalTasks;
+        public final int completedTasks;
+
+        public ProductivityStat(double completionRate, LocalDate statDate, LocalDateTime createdAt,
+                                int totalTasks, int completedTasks) {
+            this.completionRate = completionRate;
+            this.statDate = statDate;
+            this.createdAt = createdAt;
+            this.totalTasks = totalTasks;
+            this.completedTasks = completedTasks;
+        }
+
+        // Геттеры (опционально, но рекомендуются)
+        public double getCompletionRate() { return completionRate; }
+        public LocalDate getStatDate() { return statDate; }
+        public LocalDateTime getCreatedAt() { return createdAt; }
+        public int getTotalTasks() { return totalTasks; }
+        public int getCompletedTasks() { return completedTasks; }
+    }
+
+    /**
+     * Класс для хранения статистики
+     */
+    public static class TaskStats {
+        public final int totalTasks;
+        public final int oldTasks;
+        public final int todayTasks;
+
+        public TaskStats(int totalTasks, int oldTasks, int todayTasks) {
+            this.totalTasks = totalTasks;
+            this.oldTasks = oldTasks;
+            this.todayTasks = todayTasks;
+        }
+    }
+
+
+    // === ВЛОЖЕННЫЕ КЛАССЫ ===
 
     public DatabaseManager(String url, String username, String password) {
         this.url = url;
@@ -44,6 +123,7 @@ public class DatabaseManager {
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """);
+
             // Таблица с городами
             conn.createStatement().execute("""
                 CREATE TABLE IF NOT EXISTS user_city (
@@ -58,7 +138,6 @@ public class DatabaseManager {
                     id SERIAL PRIMARY KEY,
                     user_id BIGINT REFERENCES users(user_id),
                     wish_text TEXT NOT NULL,
-                    deadline TIMESTAMP,
                     completed BOOLEAN DEFAULT FALSE,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
@@ -72,19 +151,19 @@ public class DatabaseManager {
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """);
-            // Упрощенная таблица для статистики продуктивности (только процент)
-            conn.createStatement().execute("DROP TABLE IF EXISTS productivity_stats");
 
             conn.createStatement().execute("""
-            CREATE TABLE IF NOT EXISTS productivity_stats (
-                id SERIAL PRIMARY KEY,
-                user_id BIGINT REFERENCES users(user_id),
-                completion_rate DECIMAL(5,2) NOT NULL,
-                stat_date DATE NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(user_id, stat_date)
-            )
-        """);
+                CREATE TABLE IF NOT EXISTS productivity_stats (
+                    id SERIAL PRIMARY KEY,
+                    user_id BIGINT REFERENCES users(user_id),
+                    completion_rate DECIMAL(5,2) NOT NULL,
+                    stat_date DATE NOT NULL,
+                    total_tasks INT DEFAULT 0,
+                    completed_tasks INT DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(user_id, stat_date)
+                )
+            """);
 
             System.out.println("База данных инициализирована успешно");
 
@@ -108,7 +187,22 @@ public class DatabaseManager {
             System.err.println("Ошибка сохранения пользователя: " + e.getMessage());
         }
     }
- // для отправки рассылки юзерам с городом
+    public void cleanupOldProductivityStats() {
+        String sql = """
+        DELETE FROM productivity_stats
+        WHERE stat_date < CURRENT_DATE - INTERVAL '14 days'
+        """;
+        // Удаляем всё старше 14 дней
+        try (Connection conn = getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+            int deleted = stmt.executeUpdate();
+            if (deleted > 0) {
+                System.out.println("Очищено старых записей статистики: " + deleted);
+            }
+        } catch (SQLException e) {
+            System.err.println("Ошибка очистки старой статистики: " + e.getMessage());
+        }
+    }
     public void updateUserCity(Long userId, String city) {
         String sql = "UPDATE users SET city = ? WHERE user_id = ?";
         try (Connection conn = getConnection(); PreparedStatement stmt = conn.prepareStatement(sql)) {
@@ -118,6 +212,63 @@ public class DatabaseManager {
         } catch (SQLException e) {
             System.err.println("Ошибка обновления города: " + e.getMessage());
         }
+    }
+    public List<ProductivityStat> getWeeklyProductivityStats(Long userId) {
+        List<ProductivityStat> stats = new ArrayList<>();
+        String sql = """
+        SELECT completion_rate, stat_date,
+               COALESCE(total_tasks, 0) AS total_tasks,
+               COALESCE(completed_tasks, 0) AS completed_tasks,
+               created_at
+        FROM productivity_stats
+        WHERE user_id = ?
+          AND stat_date >= DATE_TRUNC('week', CURRENT_DATE)::DATE
+          AND stat_date <= DATE_TRUNC('week', CURRENT_DATE)::DATE + INTERVAL '6 days'
+        ORDER BY stat_date ASC
+        """;
+
+        try (Connection conn = getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setLong(1, userId);
+            ResultSet rs = stmt.executeQuery();
+            while (rs.next()) {
+                stats.add(new ProductivityStat(
+                        rs.getDouble("completion_rate"),
+                        rs.getDate("stat_date").toLocalDate(),
+                        rs.getTimestamp("created_at").toLocalDateTime(),
+                        rs.getInt("total_tasks"),
+                        rs.getInt("completed_tasks")
+                ));
+            }
+        } catch (SQLException e) {
+            System.err.println("Ошибка получения недельной статистики: " + e.getMessage());
+        }
+        return stats;
+    }
+
+    public void cleanupAllDailyTasks() {
+        try (Connection conn = getConnection()) {
+            String sql = "DELETE FROM daily_tasks";
+            int deleted = conn.createStatement().executeUpdate(sql);
+            System.out.println("🧹 Удалено задач: " + deleted);
+        } catch (SQLException e) {
+            System.err.println(" Ошибка при принудительной очистке: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
+    public String getUserCity(Long userId) {
+        String sql = "SELECT city FROM users WHERE user_id = ?";
+        try (Connection conn = getConnection(); PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setLong(1, userId);
+            ResultSet rs = stmt.executeQuery();
+            if (rs.next()) {
+                return rs.getString("city");
+            }
+        } catch (SQLException e) {
+            System.err.println("Ошибка получения города: " + e.getMessage());
+        }
+        return null;
     }
 
     public List<UserWithCity> getAllUsersWithCities() {
@@ -153,48 +304,6 @@ public class DatabaseManager {
         return ids;
     }
 
-    public void cleanupExpiredDailyTasks() {
-        try (Connection conn = getConnection()) {
-            // Удаляем только задачи, созданные ДО сегодняшнего дня
-            String deleteSql = "DELETE FROM daily_tasks WHERE DATE(created_at) < CURRENT_DATE";
-            int deletedCount = conn.createStatement().executeUpdate(deleteSql);
-
-            System.out.println("🗑️ Удалено " + deletedCount + " задач предыдущих дней");
-
-        } catch (SQLException e) {
-            System.err.println("❌ Ошибка при очистке задач: " + e.getMessage());
-            e.printStackTrace();
-        }
-    }
-
-    public void cleanupAllDailyTasks() {
-        try (Connection conn = getConnection()) {
-            // TRUNCATE удаляет все данные и автоматически сбрасывает sequence
-            String truncateSql = "TRUNCATE TABLE daily_tasks RESTART IDENTITY";
-            conn.createStatement().executeUpdate(truncateSql);
-
-            System.out.println("🧹 Таблица daily_tasks полностью очищена, ID сброшены к 1");
-
-        } catch (SQLException e) {
-            System.err.println("❌ Ошибка при принудительной очистке: " + e.getMessage());
-            e.printStackTrace();
-        }
-    }
-
-    public String getUserCity(Long userId) {
-        String sql = "SELECT city FROM users WHERE user_id = ?";
-        try (Connection conn = getConnection(); PreparedStatement stmt = conn.prepareStatement(sql)) {
-            stmt.setLong(1, userId);
-            ResultSet rs = stmt.executeQuery();
-            if (rs.next()) {
-                return rs.getString("city");
-            }
-        } catch (SQLException e) {
-            System.err.println("Ошибка получения города: " + e.getMessage());
-        }
-        return null;
-    }
-
     // Методы для ежедневных задач
     public int addDailyTask(Long userId, String taskText) {
         String sql = "INSERT INTO daily_tasks (user_id, task_text) VALUES (?, ?) RETURNING id";
@@ -203,7 +312,10 @@ public class DatabaseManager {
             stmt.setString(2, taskText);
             ResultSet rs = stmt.executeQuery();
             if (rs.next()) {
-                return rs.getInt("id");
+                int taskId = rs.getInt("id");
+                //  Сохраняем статистику после добавления задачи
+                saveCurrentStats(userId);
+                return taskId;
             }
         } catch (SQLException e) {
             System.err.println("Ошибка добавления задачи: " + e.getMessage());
@@ -237,13 +349,34 @@ public class DatabaseManager {
         try (Connection conn = getConnection(); PreparedStatement stmt = conn.prepareStatement(sql)) {
             stmt.setInt(1, taskId);
             stmt.setLong(2, userId);
-            return stmt.executeUpdate() > 0;
+            boolean result = stmt.executeUpdate() > 0;
+
+            //  СОХРАНЯЕМ СТАТИСТИКУ ПОСЛЕ ЗАВЕРШЕНИЯ ЗАДАЧИ
+            if (result) {
+                saveCurrentStats(userId);
+            }
+
+            return result;
         } catch (SQLException e) {
             System.err.println("Ошибка завершения задачи: " + e.getMessage());
         }
         return false;
     }
 
+    public void saveCurrentStats(Long userId) {
+        // Получаем задачи пользователя за сегодня
+        List<Task> tasks = getDailyTasks(userId);
+        int totalTasks = tasks.size();
+        int completedTasks = (int) tasks.stream().filter(Task::isCompleted).count();
+
+        if (totalTasks > 0 || completedTasks > 0) {
+            saveProductivityStats(userId, completedTasks, totalTasks);
+            double rate = totalTasks > 0 ? (double) completedTasks / totalTasks * 100 : 0.0;
+            System.out.println("📊 Сохранена статистика для пользователя " + userId + ": " + String.format("%.2f", rate) + "% (" + completedTasks + "/" + totalTasks + ")");
+        } else {
+            System.out.println("ℹ️ Нет задач для пользователя " + userId + " — сохранение пропущено");
+        }
+    }
     public List<Task> getDailyTasks(Long userId) {
         List<Task> tasks = new ArrayList<>();
         // Показываем все сегодняшние задачи
@@ -266,12 +399,11 @@ public class DatabaseManager {
     }
 
     // Методы для карты желаний
-    public int addWish(Long userId, String wishText, LocalDateTime deadline) {
-        String sql = "INSERT INTO wishlist (user_id, wish_text, deadline) VALUES (?, ?, ?) RETURNING id";
+    public int addWish(Long userId, String wishText) {
+        String sql = "INSERT INTO wishlist (user_id, wish_text) VALUES (?, ?) RETURNING id";
         try (Connection conn = getConnection(); PreparedStatement stmt = conn.prepareStatement(sql)) {
             stmt.setLong(1, userId);
             stmt.setString(2, wishText);
-            stmt.setTimestamp(3, deadline != null ? Timestamp.valueOf(deadline) : null);
             ResultSet rs = stmt.executeQuery();
             if (rs.next()) {
                 return rs.getInt("id");
@@ -284,7 +416,7 @@ public class DatabaseManager {
 
     public List<Wish> getWishes(Long userId) {
         List<Wish> wishes = new ArrayList<>();
-        String sql = "SELECT id, wish_text, deadline, completed, created_at FROM wishlist WHERE user_id = ? ORDER BY created_at";
+        String sql = "SELECT id, wish_text, completed, created_at FROM wishlist WHERE user_id = ? ORDER BY created_at";
         try (Connection conn = getConnection(); PreparedStatement stmt = conn.prepareStatement(sql)) {
             stmt.setLong(1, userId);
             ResultSet rs = stmt.executeQuery();
@@ -292,7 +424,6 @@ public class DatabaseManager {
                 wishes.add(new Wish(
                         rs.getInt("id"),
                         rs.getString("wish_text"),
-                        rs.getTimestamp("deadline") != null ? rs.getTimestamp("deadline").toLocalDateTime() : null,
                         rs.getBoolean("completed"),
                         rs.getTimestamp("created_at").toLocalDateTime()
                 ));
@@ -351,21 +482,30 @@ public class DatabaseManager {
         } catch (SQLException e) {
             System.err.println("Ошибка проверки блокировки: " + e.getMessage());
         }
-        System.out.println("❌ Блокировка не найдена или неактивна");
+        System.out.println(" Блокировка не найдена или неактивна");
         return false;
     }
 
     public void lockWishlist(Long userId) {
-        // Исправленный SQL - убираем кавычки вокруг параметра
         String sql = "INSERT INTO wishlist_locks (user_id, locked, lock_until) " +
-                "VALUES (?, TRUE, CURRENT_TIMESTAMP + INTERVAL '" + WISHLIST_LOCK_DAYS  + " days') " +
+                "VALUES (?, TRUE, DATE_TRUNC('day', CURRENT_TIMESTAMP + INTERVAL '" + WISHLIST_LOCK_DAYS + " days') + INTERVAL '23 hours 59 minutes') " +
                 "ON CONFLICT (user_id) DO UPDATE SET " +
-                "locked = TRUE, lock_until = CURRENT_TIMESTAMP + INTERVAL '" + WISHLIST_LOCK_DAYS  + " days'";
+                "locked = TRUE, lock_until = DATE_TRUNC('day', CURRENT_TIMESTAMP + INTERVAL '" + WISHLIST_LOCK_DAYS + " days') + INTERVAL '23 hours 59 minutes'";
 
         try (Connection conn = getConnection(); PreparedStatement stmt = conn.prepareStatement(sql)) {
             stmt.setLong(1, userId);
             stmt.executeUpdate();
-            System.out.println("🔒 Пользователь " + userId + " заблокирован на " + WISHLIST_LOCK_DAYS + " дней");
+
+            // Логируем время блокировки
+            String checkSql = "SELECT lock_until FROM wishlist_locks WHERE user_id = ?";
+            try (PreparedStatement checkStmt = conn.prepareStatement(checkSql)) {
+                checkStmt.setLong(1, userId);
+                ResultSet rs = checkStmt.executeQuery();
+                if (rs.next()) {
+                    Timestamp lockUntil = rs.getTimestamp("lock_until");
+                    System.out.println("🔒 Пользователь " + userId + " заблокирован на " + WISHLIST_LOCK_DAYS + " дней (до " + lockUntil + ")");
+                }
+            }
         } catch (SQLException e) {
             System.err.println("Ошибка блокировки wishlist: " + e.getMessage());
             e.printStackTrace();
@@ -396,11 +536,6 @@ public class DatabaseManager {
                 stmt.executeUpdate();
             }
 
-            String resetSequenceSQL = "ALTER SEQUENCE wishlist_id_seq RESTART WITH 1";
-            try (PreparedStatement stmt = conn.prepareStatement(resetSequenceSQL)) {
-                stmt.executeUpdate();
-            }
-
         } catch (SQLException e) {
             System.err.println("Ошибка сброса wishlist: " + e.getMessage());
             throw new RuntimeException(e);
@@ -422,29 +557,6 @@ public class DatabaseManager {
         return null;
     }
 
-    public void cleanupExpiredWishes() {
-        try (Connection conn = getConnection()) {
-            // Удаляем желания, у которых истек срок блокировки
-            String deleteSql = """
-                DELETE FROM wishlist
-                WHERE user_id IN (
-                    SELECT user_id FROM wishlist_locks
-                    WHERE locked = TRUE AND lock_until < CURRENT_TIMESTAMP
-                )
-                """;
-            int deletedCount = conn.createStatement().executeUpdate(deleteSql);
-
-            // Разблокируем пользователей после удаления
-            String unlockSql = "UPDATE wishlist_locks SET locked = FALSE WHERE lock_until < CURRENT_TIMESTAMP";
-            int unlockedCount = conn.createStatement().executeUpdate(unlockSql);
-
-            if (deletedCount > 0 || unlockedCount > 0) {
-                System.out.println("🗑️ Удалено " + deletedCount + " устаревших желаний, разблокировано " + unlockedCount + " пользователей");
-            }
-        } catch (SQLException e) {
-            System.err.println("❌ Ошибка при очистке устаревших желаний: " + e.getMessage());
-        }
-    }
 
     public void cleanupUnlockedWishes() {
         try (Connection conn = getConnection()) {
@@ -459,16 +571,17 @@ public class DatabaseManager {
             int deletedCount = conn.createStatement().executeUpdate(deleteSql);
 
             if (deletedCount > 0) {
-                System.out.println("🗑️ Удалено " + deletedCount + " незаблокированных желаний");
+                System.out.println(" Удалено " + deletedCount + " незаблокированных желаний");
             } else {
-                System.out.println("✅ Нет незаблокированных желаний для удаления");
+                System.out.println(" Нет незаблокированных желаний для удаления");
             }
 
         } catch (SQLException e) {
-            System.err.println("❌ Ошибка при очистке незаблокированных желаний: " + e.getMessage());
+            System.err.println(" Ошибка при очистке незаблокированных желаний: " + e.getMessage());
             e.printStackTrace();
         }
     }
+
     // Методы для статистики
     public double getDailyCompletionRate(Long userId) {
         String sql = """
@@ -492,7 +605,6 @@ public class DatabaseManager {
         }
         return 0.0;
     }
-/// ///////
 
     public TaskStats getTaskStats() {
         try (Connection conn = getConnection()) {
@@ -538,18 +650,26 @@ public class DatabaseManager {
     }
 
     // Метод для сохранения/обновления статистики (только процент)
-    public void saveProductivityStats(Long userId, double completionRate) {
+    public void saveProductivityStats(Long userId, int completedTasks, int totalTasks) {
+        double rate = totalTasks > 0 ? (double) completedTasks / totalTasks * 100 : 0.0;
         String sql = """
-            INSERT INTO productivity_stats (user_id, completion_rate, stat_date)
-            VALUES (?, ?, CURRENT_DATE)
-            ON CONFLICT (user_id, stat_date) DO UPDATE SET
-                completion_rate = EXCLUDED.completion_rate,
-                created_at = CURRENT_TIMESTAMP
-            """;
+        INSERT INTO productivity_stats
+            (user_id, completion_rate, stat_date, total_tasks, completed_tasks)
+        VALUES (?, ?, CURRENT_DATE, ?, ?)
+        ON CONFLICT (user_id, stat_date)
+        DO UPDATE SET
+            completion_rate = EXCLUDED.completion_rate,
+            total_tasks = EXCLUDED.total_tasks,
+            completed_tasks = EXCLUDED.completed_tasks,
+            created_at = CURRENT_TIMESTAMP
+        """;
 
-        try (Connection conn = getConnection(); PreparedStatement stmt = conn.prepareStatement(sql)) {
+        try (Connection conn = getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
             stmt.setLong(1, userId);
-            stmt.setDouble(2, completionRate);
+            stmt.setDouble(2, Math.round(rate * 100.0) / 100.0); // округление до 2 знаков
+            stmt.setInt(3, totalTasks);
+            stmt.setInt(4, completedTasks);
             stmt.executeUpdate();
         } catch (SQLException e) {
             System.err.println("Ошибка сохранения статистики: " + e.getMessage());
@@ -573,31 +693,11 @@ public class DatabaseManager {
         return null; // Возвращаем null если статистики нет
     }
 
-    // Метод для получения статистики за неделю (последние 7 дней)
-    public List<Double> getWeeklyStats(Long userId) {
-        List<Double> stats = new ArrayList<>();
-        String sql = "SELECT completion_rate FROM productivity_stats " +
-                "WHERE user_id = ? AND stat_date >= CURRENT_DATE - INTERVAL '7 days' " +
-                "ORDER BY stat_date DESC";
-
-        try (Connection conn = getConnection(); PreparedStatement stmt = conn.prepareStatement(sql)) {
-            stmt.setLong(1, userId);
-            ResultSet rs = stmt.executeQuery();
-
-            while (rs.next()) {
-                stats.add(rs.getDouble("completion_rate"));
-            }
-        } catch (SQLException e) {
-            System.err.println("Ошибка получения недельной статистики: " + e.getMessage());
-        }
-        return stats;
-    }
-
 
     // Метод для сохранения статистики всех активных пользователей
     public void saveAllUsersProductivityStats() {
         try (Connection conn = getConnection()) {
-            // Получаем всех пользователей, у которых есть задачи сегодня
+            // Получаем всех пользователей, у которых есть задачи за сегодня
             String usersSql = "SELECT DISTINCT user_id FROM daily_tasks WHERE DATE(created_at) = CURRENT_DATE";
             List<Long> activeUserIds = new ArrayList<>();
 
@@ -608,77 +708,26 @@ public class DatabaseManager {
                 }
             }
 
-            // Сохраняем статистику для каждого активного пользователя
+            System.out.println("👥 Найдено активных пользователей с задачами: " + activeUserIds.size());
+
             int savedCount = 0;
             for (Long userId : activeUserIds) {
-                double completionRate = getDailyCompletionRate(userId);
-                if (!Double.isNaN(completionRate)) { // Сохраняем только если есть задачи
-                    saveProductivityStats(userId, completionRate);
-                    savedCount++;
-                }
+                List<Task> tasks = getDailyTasks(userId);
+                int totalTasks = tasks.size();
+                int completedTasks = (int) tasks.stream().filter(Task::isCompleted).count();
+
+                saveProductivityStats(userId, completedTasks, totalTasks);
+                savedCount++;
+
+                double rate = totalTasks > 0 ? (double) completedTasks / totalTasks * 100 : 0.0;
+                System.out.println("   → " + userId + ": " + String.format("%.2f", rate) + "% (" + completedTasks + "/" + totalTasks + ")");
             }
 
-            System.out.println("💾 Сохранена статистика для " + savedCount + " пользователей");
+            System.out.println("✅ Сохранена статистика для " + savedCount + " пользователей");
 
         } catch (SQLException e) {
             System.err.println("❌ Ошибка при сохранении статистики всех пользователей: " + e.getMessage());
+            e.printStackTrace();
         }
     }
-
-    /**
-     * Класс для хранения статистики
-     */
-    public static class TaskStats {
-        public final int totalTasks;
-        public final int oldTasks;
-        public final int todayTasks;
-
-        public TaskStats(int totalTasks, int oldTasks, int todayTasks) {
-            this.totalTasks = totalTasks;
-            this.oldTasks = oldTasks;
-            this.todayTasks = todayTasks;
-        }
-    }
-    // Классы-модели
-    public static class Task {
-        private final int id;
-        private final String text;
-        private final boolean completed;
-        private final LocalDateTime createdAt;
-
-        public Task(int id, String text, boolean completed, LocalDateTime createdAt) {
-            this.id = id;
-            this.text = text;
-            this.completed = completed;
-            this.createdAt = createdAt;
-        }
-
-        public int getId() { return id; }
-        public String getText() { return text; }
-        public boolean isCompleted() { return completed; }
-        public LocalDateTime getCreatedAt() { return createdAt; }
-    }
-
-    public static class Wish {
-        private final int id;
-        private final String text;
-        private final LocalDateTime deadline;
-        private final boolean completed;
-        private final LocalDateTime createdAt;
-
-        public Wish(int id, String text, LocalDateTime deadline, boolean completed, LocalDateTime createdAt) {
-            this.id = id;
-            this.text = text;
-            this.deadline = deadline;
-            this.completed = completed;
-            this.createdAt = createdAt;
-        }
-
-        public int getId() { return id; }
-        public String getText() { return text; }
-        public LocalDateTime getDeadline() { return deadline; }
-        public boolean isCompleted() { return completed; }
-        public LocalDateTime getCreatedAt() { return createdAt; }
-    }
-
 }

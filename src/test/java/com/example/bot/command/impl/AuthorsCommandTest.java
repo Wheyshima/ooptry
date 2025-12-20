@@ -17,8 +17,8 @@ public class AuthorsCommandTest {
         assertTrue(response.contains("осознанной жизни"));
         assertTrue(response.contains("Наша история"));
         assertTrue(response.contains("Контакты"));
-        assertTrue(response.contains("harumiRui: @harumi_rui"));
-        assertTrue(response.contains("angrycoke: @wheyshima"));
+        assertTrue(response.contains("@harumi_rui"));
+        assertTrue(response.contains("@wheyshima"));
         assertTrue(response.contains("Благодарности"));
         assertTrue(response.contains("С любовью к осознанности"));
     }

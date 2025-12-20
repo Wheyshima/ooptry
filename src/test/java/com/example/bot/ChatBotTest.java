@@ -1,19 +1,15 @@
-
 package com.example.bot;
 
-import com.example.bot.command.Command;
-import com.example.bot.command.CommandRegistry;
 import com.example.bot.database.DatabaseManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.MockedStatic;
 import org.telegram.telegrambots.meta.api.objects.Message;
 import org.telegram.telegrambots.meta.api.objects.Update;
+import org.telegram.telegrambots.meta.api.objects.User;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
-
-
-// Тесты для основного класса бота
 
 class ChatBotTest {
 
@@ -22,27 +18,32 @@ class ChatBotTest {
 
     @BeforeEach
     void setUp() {
-        // Создаем мок DatabaseManager
         databaseManager = mock(DatabaseManager.class);
-        // Создаем реальный бот с тестовыми данными
         chatBot = new ChatBot("test_bot", "test_token", databaseManager);
     }
 
     @Test
-    void testBotCreation() {
-        // Given & When
-        ChatBot bot = new ChatBot("test_bot", "test_token",databaseManager);
-
-        // Then
-        assertNotNull(bot);
-        assertEquals("test_bot", bot.getBotUsername());
-        assertEquals("test_token", bot.getBotToken());
+    void botCreation_setsCorrectUsernameAndToken() {
+        assertEquals("test_bot", chatBot.getBotUsername());
+        assertEquals("test_token", chatBot.getBotToken());
     }
 
     @Test
-    void testHandleMessageWithText() {
+    void handleMessage_startCommand_savesUserToDatabase() {
         // Given
-        Message message = createMessageWithText("/start");
+        Long userId = 12345L;
+        String username = "testuser";
+
+        User user = mock(User.class);
+        when(user.getId()).thenReturn(userId);
+        when(user.getUserName()).thenReturn(username);
+
+        Message message = mock(Message.class);
+        when(message.getFrom()).thenReturn(user);
+        when(message.getText()).thenReturn("/start");
+        when(message.hasText()).thenReturn(true);
+        when(message.getChatId()).thenReturn(userId);
+
         Update update = new Update();
         update.setMessage(message);
 
@@ -50,12 +51,35 @@ class ChatBotTest {
         chatBot.onUpdateReceived(update);
 
         // Then
-        // Если метод выполнился без исключений - тест пройден
-        assertTrue(true);
+        verify(databaseManager).saveUser(userId, username);
     }
 
     @Test
-    void testHandleMessageWithoutText() {
+    void handleMessage_unknownCommand_savesUserButDoesNotCrash() {
+        // Given
+        Long userId = 12345L;
+        String username = "testuser";
+
+        User user = mock(User.class);
+        when(user.getId()).thenReturn(userId);
+        when(user.getUserName()).thenReturn(username);
+
+        Message message = mock(Message.class);
+        when(message.getFrom()).thenReturn(user);
+        when(message.getText()).thenReturn("/unknown_command");
+        when(message.hasText()).thenReturn(true);
+        when(message.getChatId()).thenReturn(userId);
+
+        Update update = new Update();
+        update.setMessage(message);
+
+        // When & Then — не должно быть исключений
+        assertDoesNotThrow(() -> chatBot.onUpdateReceived(update));
+        verify(databaseManager).saveUser(userId, username);
+    }
+
+    @Test
+    void handleMessage_messageWithoutText_doesNotSaveUser() {
         // Given
         Message message = mock(Message.class);
         when(message.hasText()).thenReturn(false);
@@ -67,122 +91,104 @@ class ChatBotTest {
         chatBot.onUpdateReceived(update);
 
         // Then
-        // Метод должен выполниться без исключений для сообщения без текста
-        assertTrue(true);
+        verify(databaseManager, never()).saveUser(anyLong(), anyString());
     }
 
     @Test
-    void testHandleUpdateWithoutMessage() {
+    void handleMessage_updateWithoutMessage_doesNothing() {
         // Given
-        Update update = new Update();
-        // message не установлен
-
-        // When
-        chatBot.onUpdateReceived(update);
-
-        // Then
-        // Метод должен обработать update без message
-        assertTrue(true);
-    }
-
-    @Test
-    void testBotInfo() {
-        // Given & When
-        String username = chatBot.getBotUsername();
-        String token = chatBot.getBotToken();
-
-        // Then
-        assertEquals("test_bot", username);
-        assertEquals("test_token", token);
-    }
-
-    @Test
-    void testBotInitialization() {
-        // Given & When
-        ChatBot bot = new ChatBot("my_bot", "my_token",databaseManager);
-
-        // Then
-        assertNotNull(bot);
-        // Бот должен быть готов к работе после создания
-        assertDoesNotThrow(() -> bot.onUpdateReceived(new Update()));
-    }
-
-    @Test
-    void testMultipleMessagesHandling() {
-        // Given
-        Message message1 = createMessageWithText("/start");
-        Message message2 = createMessageWithText("/about");
-        Message message3 = createMessageWithText("/help");
-
-        Update update1 = new Update();
-        update1.setMessage(message1);
-
-        Update update2 = new Update();
-        update2.setMessage(message2);
-
-        Update update3 = new Update();
-        update3.setMessage(message3);
+        Update update = new Update(); // message == null
 
         // When & Then
-        assertDoesNotThrow(() -> {
-            chatBot.onUpdateReceived(update1);
-            chatBot.onUpdateReceived(update2);
-            chatBot.onUpdateReceived(update3);
-        });
+        assertDoesNotThrow(() -> chatBot.onUpdateReceived(update));
+        verify(databaseManager, never()).saveUser(anyLong(), anyString());
     }
 
     @Test
-    void testEmptyMessageText() {
+    void handleMessage_emptyText_savesUser() {
         // Given
-        Message message = createMessageWithText("");
-        Update update = new Update();
-        update.setMessage(message);
+        Long userId = 12345L;
+        String username = "testuser";
 
-        // When
-        chatBot.onUpdateReceived(update);
+        User user = mock(User.class);
+        when(user.getId()).thenReturn(userId);
+        when(user.getUserName()).thenReturn(username);
 
-        // Then
-        // Должен обработать пустой текст без ошибок
-        assertTrue(true);
-    }
-
-    @Test
-    void testVeryLongMessage() {
-        // Given
-        String longText = "A".repeat(1000);
-        Message message = createMessageWithText(longText);
-        Update update = new Update();
-        update.setMessage(message);
-
-        // When
-        chatBot.onUpdateReceived(update);
-
-        // Then
-        // Должен обработать длинное сообщение без ошибок
-        assertTrue(true);
-    }
-
-    @Test
-    void testSpecialCharactersInMessage() {
-        // Given
-        Message message = createMessageWithText("/start @#$%^&*() test");
-        Update update = new Update();
-        update.setMessage(message);
-
-        // When
-        chatBot.onUpdateReceived(update);
-
-        // Then
-        // Должен обработать специальные символы без ошибок
-        assertTrue(true);
-    }
-
-    private Message createMessageWithText(String text) {
         Message message = mock(Message.class);
+        when(message.getFrom()).thenReturn(user);
+        when(message.getText()).thenReturn("");
         when(message.hasText()).thenReturn(true);
+        when(message.getChatId()).thenReturn(userId);
+
+        Update update = new Update();
+        update.setMessage(message);
+
+        // When
+        chatBot.onUpdateReceived(update);
+
+        // Then
+        // Пустой текст — всё равно сохраняем пользователя (логика бота такова)
+        verify(databaseManager).saveUser(userId, username);
+    }
+
+    @Test
+    void handleMessage_specialCharacters_savesUser() {
+        // Given
+        Long userId = 12345L;
+        String username = "testuser";
+
+        User user = mock(User.class);
+        when(user.getId()).thenReturn(userId);
+        when(user.getUserName()).thenReturn(username);
+
+        Message message = mock(Message.class);
+        when(message.getFrom()).thenReturn(user);
+        when(message.getText()).thenReturn("/start @#$%^&*() тест");
+        when(message.hasText()).thenReturn(true);
+        when(message.getChatId()).thenReturn(userId);
+
+        Update update = new Update();
+        update.setMessage(message);
+
+        // When
+        chatBot.onUpdateReceived(update);
+
+        // Then
+        verify(databaseManager).saveUser(userId, username);
+    }
+
+    @Test
+    void multipleMessages_saveEachUser() {
+        // Given
+        Update update1 = createUpdateWithText("/start", 123L, "user1");
+        Update update2 = createUpdateWithText("/help", 456L, "user2");
+        Update update3 = createUpdateWithText("/unknown", 789L, "user3");
+
+        // When
+        chatBot.onUpdateReceived(update1);
+        chatBot.onUpdateReceived(update2);
+        chatBot.onUpdateReceived(update3);
+
+        // Then
+        verify(databaseManager).saveUser(123L, "user1");
+        verify(databaseManager).saveUser(456L, "user2");
+        verify(databaseManager).saveUser(789L, "user3");
+    }
+
+    // Вспомогательный метод для создания Update
+    private Update createUpdateWithText(String text, Long userId, String username) {
+        User user = mock(User.class);
+        when(user.getId()).thenReturn(userId);
+        when(user.getUserName()).thenReturn(username);
+
+        Message message = mock(Message.class);
+        when(message.getFrom()).thenReturn(user);
         when(message.getText()).thenReturn(text);
-        when(message.getChatId()).thenReturn(12345L);
-        return message;
+        when(message.hasText()).thenReturn(true);
+        when(message.getChatId()).thenReturn(userId);
+
+        Update update = new Update();
+        update.setMessage(message);
+        return update;
     }
 }
-
