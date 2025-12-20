@@ -62,7 +62,7 @@ class TaskSchedulerServiceTest {
         );
 
         // Выполняем задачу вручную и проверяем вызовы
-        Runnable cleanupTask = captureRunnable(mockScheduler, 0);
+        Runnable cleanupTask = captureRunnable(mockScheduler);
         cleanupTask.run();
 
         verify(mockDatabaseManager).cleanupOldProductivityStats();
@@ -144,11 +144,11 @@ class TaskSchedulerServiceTest {
     }
 
     // Вспомогательный метод для получения запланированного Runnable
-    private Runnable captureRunnable(ScheduledExecutorService scheduler, int callIndex) {
+    private Runnable captureRunnable(ScheduledExecutorService scheduler) {
         var captor = org.mockito.ArgumentCaptor.forClass(Runnable.class);
-        verify(scheduler, atLeast(callIndex + 1)).scheduleAtFixedRate(
+        verify(scheduler, atLeast(1)).scheduleAtFixedRate(
                 captor.capture(), anyLong(), anyLong(), any()
         );
-        return captor.getAllValues().get(callIndex);
+        return captor.getAllValues().getFirst();
     }
 }

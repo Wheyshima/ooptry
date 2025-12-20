@@ -16,7 +16,7 @@ public class TarotParser {
     private static final String BASE_URL = "https://astrohelper.ru";
     private static final String INDEX_URL = "https://astrohelper.ru/gadaniya/taro/znachenie/";
 
-    public List<TarotService.TarotCard> parseAllCards() {
+    public List<TarotCard> parseAllCards() {
         logger.info("🔄 Начинаю парсинг всех карт Таро с {}", INDEX_URL);
 
         try {
@@ -25,7 +25,7 @@ public class TarotParser {
                     .timeout(10000)
                     .get();
 
-            List<TarotService.TarotCard> cards = new ArrayList<>();
+            List<TarotCard> cards = new ArrayList<>();
             Elements h2s = doc.select("h2");
 
             logger.info("Найдено {} заголовков <h2>", h2s.size());
@@ -45,7 +45,7 @@ public class TarotParser {
                             String href = link.attr("href");
                             String cardUrl = BASE_URL + href.replace("../../../", "/");
 
-                            TarotService.TarotCard card = parseCard(cardUrl);
+                            TarotCard card = parseCard(cardUrl);
                             if (card != null) {
                                 cards.add(card);
                             }
@@ -67,7 +67,7 @@ public class TarotParser {
     }
 
     //парсинг сайта с картой
-    private TarotService.TarotCard parseCard(String url) {
+    private TarotCard parseCard(String url) {
         try {
             logger.debug("📥 Загрузка карты: {}", url);
             Document doc = Jsoup.connect(url)
@@ -107,11 +107,45 @@ public class TarotParser {
             }
 
             logger.debug("✅ Успешно спарсена карта: {} | Прямое: {} | Перевёрнутое: {}", name, upright, reversed);
-            return new TarotService.TarotCard(name, upright, reversed);
+            return new TarotCard(name, upright, reversed);
 
         } catch (Exception e) {
             logger.warn("⚠️ Ошибка парсинга карты {}: {}", url, e.getMessage());
             return null;
         }
+    }
+
+    // НОВЫЙ МЕТОД — для тестов
+    TarotCard parseCardFromDocument(Document doc) {
+        Element h1 = doc.selectFirst("h1");
+        if (h1 == null) {
+            logger.warn("⚠️ Не найден <h1> на странице {}", "mock-url");
+            return null;
+        }
+        String name = h1.text()
+                .replace("Аркана", "")
+                .replace(":", "")
+                .replace("Значение и описание", "")
+                .trim();
+
+        String upright = "Прямое значение не найдено";
+        String reversed = "Перевёрнутое значение не найдено";
+
+        Elements rows = doc.select("table.table-striped tbody tr");
+        for (Element row : rows) {
+            Elements cols = row.select("td");
+            if (cols.size() == 2) {
+                String label = cols.get(0).text().toLowerCase().trim();
+                String value = cols.get(1).text().trim();
+
+                if (label.contains("прямое положение")) {
+                    upright = value;
+                } else if (label.contains("перевернутое положение") || label.contains("перевёрнутое положение")) {
+                    reversed = value;
+                }
+            }
+        }
+
+        return new TarotCard(name, upright, reversed);
     }
 }

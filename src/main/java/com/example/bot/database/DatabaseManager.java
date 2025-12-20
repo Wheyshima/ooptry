@@ -5,6 +5,7 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 
+@SuppressWarnings("CallToPrintStackTrace")
 public class DatabaseManager {
     private final String url;
     private final String username;
@@ -146,7 +147,6 @@ public class DatabaseManager {
                 )
             """);
 
-
             conn.createStatement().execute("""
                 CREATE TABLE IF NOT EXISTS productivity_stats (
                     id SERIAL PRIMARY KEY,
@@ -240,11 +240,8 @@ public class DatabaseManager {
         }
         return stats;
     }
-
-
-
-    // В   fdfdfdDatabaseManager.java
-    public List<Long> getAllUserIds(){
+    // В DatabaseManager.java
+    public List<Long> getAllUserIds() {
         String sql = "SELECT user_id FROM users";
         List<Long> userIds = new ArrayList<>();
         try (Connection conn = getConnection();
@@ -266,6 +263,7 @@ public class DatabaseManager {
             System.out.println("🧹 Удалено задач: " + deleted);
         } catch (SQLException e) {
             System.err.println(" Ошибка при принудительной очистке: " + e.getMessage());
+            //noinspection CallToPrintStackTrace
             e.printStackTrace();
         }
     }

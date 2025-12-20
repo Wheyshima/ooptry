@@ -22,7 +22,7 @@ public class MorningNewsletterService {
     public MorningNewsletterService(DatabaseManager databaseManager, AbsSender bot, String openWeatherApiKey) {
         this.databaseManager = databaseManager;
         this.bot = bot;
-        this.weatherService = new WeatherService(openWeatherApiKey); // ✅
+        this.weatherService = new WeatherService(openWeatherApiKey); //
         this.tarotService = new DailyTarotService();
     }
 

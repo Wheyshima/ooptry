@@ -1,6 +1,5 @@
 package com.example.bot;
 
-
 import com.example.bot.database.DatabaseManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;

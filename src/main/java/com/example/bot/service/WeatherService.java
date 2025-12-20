@@ -11,42 +11,48 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
-import java.time.Clock;
-import java.time.Instant;
-import java.time.LocalDate;
-import java.time.ZoneId;
+import java.time.*;
 import java.util.Iterator;
 import java.util.Locale;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
 public class WeatherService {
+
     private static final Logger logger = LoggerFactory.getLogger(WeatherService.class);
-    private static final String FORECAST_URL = "https://api.openweathermap.org/data/2.5/forecast"; // ← пробелы удалены
-    private final String apiKey;
+    private static final String FORECAST_URL = "https://api.openweathermap.org/data/2.5/forecast";
     private static final ZoneId TZ = ZoneId.of("Asia/Yekaterinburg");
 
+    private final String apiKey;
     private final HttpClient client;
     private final ObjectMapper objectMapper;
     private final ConcurrentMap<String, CachedForecast> cache;
+    private final WeatherCacheStorage cacheStorage;
     private final Clock clock;
 
-    // Основной конструктор (для продакшена)
+    // === Конструкторы ===
+
     public WeatherService(String openWeatherApiKey) {
         this(openWeatherApiKey, Clock.systemDefaultZone());
     }
-
-    // Пакетно-видимый конструктор для тестов
+    // Пакетно-видимый конструктор для продакшена с кастомными часами
     WeatherService(String openWeatherApiKey, Clock clock) {
+        this(openWeatherApiKey, clock, new WeatherCacheStorage()); // ← делегирование
+    }
+    // Пакетно-видимый конструктор для тестов
+    WeatherService(String openWeatherApiKey, Clock clock, WeatherCacheStorage cacheStorage) {
         if (openWeatherApiKey == null || openWeatherApiKey.trim().isEmpty()) {
             throw new IllegalArgumentException("OpenWeather API key is required");
         }
-        this.apiKey = openWeatherApiKey;
+        this.apiKey = openWeatherApiKey.trim();
         this.clock = clock;
         this.client = HttpClient.newHttpClient();
         this.objectMapper = new ObjectMapper();
         this.cache = new ConcurrentHashMap<>();
+        this.cacheStorage = cacheStorage; // ← инжектируем мок
     }
+
+    // === Вложенные классы ===
 
     private static class CachedForecast {
         final String text;
@@ -62,35 +68,54 @@ public class WeatherService {
         }
     }
 
+    // === Public API ===
+
+    /**
+     * Возвращает прогноз погоды на сегодня с кэшированием (1 запрос на город в день).
+     */
+    public String getTodayForecast(String cityName) {
+        if (cityName == null || cityName.isBlank()) {
+            return "🌤️ Город не указан — не могу показать погоду.";
+        }
+
+        String normalizedCity = cityName.trim();
+        String cacheKey = normalizedCity.toLowerCase(Locale.ROOT);
+        LocalDate today = now();
+
+        // Удаление устаревших записей (защита от утечки памяти)
+        cache.entrySet().removeIf(entry -> entry.getValue().isExpired(today));
+        cacheStorage.removeExpired(today);
+        // Сначала проверяем быстрый RAM-кэш
+        CachedForecast cached = cache.get(cacheKey);
+        if (cached != null && !cached.isExpired(today)) {
+            return cached.text;
+        }
+        //  Если нет в RAM — проверяем файловый кэш
+        WeatherCacheStorage.CachedForecast fileCached = cacheStorage.get(cacheKey);
+        if (fileCached != null && !fileCached.isExpired(today)) {
+            // Загружаем в RAM для ускорения последующих запросов
+            CachedForecast ramCached = new CachedForecast(fileCached.text, fileCached.cachedAt);
+            cache.put(cacheKey, ramCached);
+            return fileCached.getText(); // ← правильно
+        }
+
+        String forecast = fetchForecastFromApi(normalizedCity);
+        CachedForecast newCached = new CachedForecast(forecast, today);
+
+        cache.put(cacheKey, newCached);
+        cacheStorage.save(cacheKey, forecast, today);
+        return forecast;
+    }
+
+    // === Private helpers ===
+
     private LocalDate now() {
         return LocalDate.now(clock.withZone(TZ));
     }
 
-    /**
-     * Возвращает прогноз на сегодня с кэшированием (1 запрос на город в день)
-     */
-    public String getTodayForecast(String cityName) {
-        if (cityName == null || cityName.trim().isEmpty()) {
-            return "🌤️ Город не указан — не могу показать погоду.";
-        }
-        String key = cityName.trim().toLowerCase(Locale.ROOT); // нормализация ключа
-        LocalDate today = now();
-
-        // Опционально: удаляем устаревшие записи (чтобы не росла утечка памяти)
-        // Это безопасно для ConcurrentHashMap, но может быть дорого при частых вызовах
-        cache.entrySet().removeIf(entry -> entry.getValue().isExpired(today));
-
-        CachedForecast cached = cache.get(key);
-        if (cached != null && !cached.isExpired(today)) {
-            return cached.text;
-        }
-
-        String forecast = fetchForecastFromApi(cityName); // передаём оригинальное имя
-        cache.put(key, new CachedForecast(forecast, today));
-        return forecast;
-    }
-
     private String fetchForecastFromApi(String cityName) {
+        System.out.println("🌍 Запрос погоды из API для города: {}"+ cityName);
+
         try {
             String encodedCity = URLEncoder.encode(cityName, StandardCharsets.UTF_8);
             String url = String.format(
@@ -100,7 +125,7 @@ public class WeatherService {
 
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(url))
-                    .timeout(java.time.Duration.ofSeconds(10))
+                    .timeout(Duration.ofSeconds(10))
                     .build();
 
             HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
@@ -111,60 +136,81 @@ public class WeatherService {
             }
 
             JsonNode root = objectMapper.readTree(response.body());
-            JsonNode list = root.get("list");
-            if (list == null || list.isEmpty()) {
+            JsonNode list = root.path("list");
+            if (list.isMissingNode() || list.isEmpty()) {
                 return "🌤️ Прогноз для " + cityName + " пуст";
             }
 
-            LocalDate today = now();
-            double minTemp = Double.MAX_VALUE;
-            double maxTemp = Double.MIN_VALUE;
-            String description = null;
-
-            for (Iterator<JsonNode> it = list.elements(); it.hasNext(); ) {
-                JsonNode item = it.next();
-                long dt = item.get("dt").asLong();
-                LocalDate itemDate = Instant.ofEpochSecond(dt).atZone(TZ).toLocalDate();
-
-                if (itemDate.equals(today)) {
-                    JsonNode main = item.get("main");
-                    if (main != null) {
-                        double temp = main.get("temp").asDouble();
-                        minTemp = Math.min(minTemp, temp);
-                        maxTemp = Math.max(maxTemp, temp);
-                    }
-                    if (description == null && item.has("weather")) {
-                        JsonNode weather = item.get("weather").get(0);
-                        if (weather != null && weather.has("description")) {
-                            description = weather.get("description").asText();
-                        }
-                    }
-                }
-            }
-
-            if (minTemp == Double.MAX_VALUE) {
-                return "🌤️ Прогноз на сегодня не найден для " + cityName;
-            }
-
-            int min = (int) Math.round(minTemp);
-            int max = (int) Math.round(maxTemp);
-            String desc = description != null ? capitalize(description) : "погода";
-            String emoji = getWeatherEmoji(desc);
-
-            if (min == max) {
-                return String.format("%s %s, около %s%d°C", emoji, desc, min >= 0 ? "+" : "", min);
-            } else {
-                return String.format("%s %s, от %s%d°C до %s%d°C", emoji, desc, min >= 0 ? "+" : "", min, max >= 0 ? "+" : "", max);
-            }
+            return processForecastData(list, now());
 
         } catch (Exception e) {
-            logger.error("Ошибка прогноза для: {}", cityName, e);
+            logger.error("Ошибка при получении прогноза для города: {}", cityName, e);
             return "🌤️ Ошибка при загрузке прогноза";
         }
     }
 
+    private String processForecastData(JsonNode list, LocalDate today) {
+        double minTemp = Double.POSITIVE_INFINITY;
+        double maxTemp = Double.NEGATIVE_INFINITY;
+        String description = null;
+
+        for (Iterator<JsonNode> it = list.elements(); it.hasNext(); ) {
+            JsonNode item = it.next();
+            long dt = item.path("dt").asLong(0);
+            if (dt == 0) continue;
+
+            LocalDateTime itemTime = Instant.ofEpochSecond(dt).atZone(TZ).toLocalDateTime();
+            if (!itemTime.toLocalDate().equals(today)) {
+                continue;
+            }
+
+            JsonNode main = item.path("main");
+            if (!main.isMissingNode()) {
+                double temp = main.path("temp").asDouble(Double.NaN);
+                if (!Double.isNaN(temp)) {
+                    minTemp = Math.min(minTemp, temp);
+                    maxTemp = Math.max(maxTemp, temp);
+                }
+            }
+
+            if (description == null && item.has("weather")) {
+                JsonNode weatherArray = item.get("weather");
+                if (weatherArray.isArray() && !weatherArray.isEmpty()) {
+                    JsonNode weather = weatherArray.get(0);
+                    if (weather.has("description")) {
+                        description = weather.get("description").asText();
+                    }
+                }
+            }
+        }
+
+        if (Double.isInfinite(minTemp)) {
+            return "🌤️ Прогноз на сегодня не найден для этого города.";
+        }
+
+        int min = (int) Math.round(minTemp);
+        int max = (int) Math.round(maxTemp);
+
+        String minStr = formatTemperature(min);
+        String maxStr = formatTemperature(max);
+        String desc = description != null ? capitalize(description) : "погода";
+        String emoji = getWeatherEmoji(desc);
+
+        if (min == max) {
+            return String.format("%s %s, около %s°C", emoji, desc, minStr);
+        } else {
+            return String.format("%s %s, от %s°C до %s°C", emoji, desc, minStr, maxStr);
+        }
+    }
+
+    private String formatTemperature(int temp) {
+        return temp >= 0 ? "+" + temp : Integer.toString(temp);
+    }
+
     private String capitalize(String input) {
-        if (input == null || input.isEmpty()) return input;
+        if (input == null || input.isEmpty()) {
+            return input;
+        }
         return input.substring(0, 1).toUpperCase(Locale.ROOT) +
                 input.substring(1).toLowerCase(Locale.ROOT);
     }

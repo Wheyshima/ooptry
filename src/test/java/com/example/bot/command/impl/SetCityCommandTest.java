@@ -3,6 +3,7 @@ package com.example.bot.command.impl;
 import com.example.bot.database.DatabaseManager;
 import com.example.bot.model.City;
 import com.example.bot.service.CityService;
+import com.example.bot.service.WeatherService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.telegram.telegrambots.meta.api.objects.Message;
@@ -15,13 +16,19 @@ class SetCityCommandTest {
 
     private DatabaseManager mockDatabaseManager;
     private CityService mockCityService;
+    private WeatherService mockWeatherService; // ← добавлено
     private SetCityCommand setCityCommand;
 
     @BeforeEach
     void setUp() {
         mockDatabaseManager = mock(DatabaseManager.class);
         mockCityService = mock(CityService.class);
-        setCityCommand = new SetCityCommand(mockDatabaseManager, mockCityService);
+        mockWeatherService = mock(WeatherService.class); // ← создан мок
+        setCityCommand = new SetCityCommand(mockDatabaseManager, mockCityService, mockWeatherService); // ← передано
+
+        // Дефолтный ответ для погоды (на случай, если тест не мокает явно)
+        when(mockWeatherService.getTodayForecast(anyString()))
+                .thenReturn("🌤️ Облачно, +18°C");
     }
 
     private Message createMessage(Long userId, String text) {
@@ -46,37 +53,46 @@ class SetCityCommandTest {
         // THEN
         assertTrue(result.contains("У вас пока не установлен город"));
         assertTrue(result.contains("/setcity Москва"));
+        // Погода не показывается, потому что города нет
+        assertFalse(result.contains("🌤️ Облачно"));
     }
 
     @Test
-    void execute_emptyArgument_cityAlreadySet_showsCurrentCity() {
+    void execute_emptyArgument_cityAlreadySet_showsCurrentCityAndWeather() {
         // GIVEN
         Long userId = 456L;
         Message message = createMessage(userId, "/setcity");
         when(mockDatabaseManager.getUserCity(userId)).thenReturn("Екатеринбург");
+        when(mockWeatherService.getTodayForecast("Екатеринбург"))
+                .thenReturn("🌧️ Дождь, +12°C");
 
         // WHEN
         String result = setCityCommand.execute(message);
 
         // THEN
         assertTrue(result.contains("Ваш текущий город: *Екатеринбург*"));
+        assertTrue(result.contains("Хотите изменить город?"));
+        assertTrue(result.contains("🌧️ Дождь, +12°C")); // ← погода добавлена
     }
 
     @Test
-    void execute_validCityName_cityFound_savesAndReturnsSuccess() {
+    void execute_validCityName_cityFound_savesAndReturnsSuccessWithWeather() {
         // GIVEN
         Long userId = 789L;
         Message message = createMessage(userId, "/setcity Москва");
         City matchedCity = new City("Москва", "Москва", 12_600_000L, 55.7558, 37.6176);
         when(mockCityService.findCity("Москва")).thenReturn(matchedCity);
 
+
         // WHEN
         String result = setCityCommand.execute(message);
 
+
         // THEN
         verify(mockDatabaseManager).updateUserCity(userId, "Москва");
-        assertTrue(result.contains("✅ Город успешно установлен:\n*Москва*"));
+        assertTrue(result.contains("✅ Город установлен: *Москва*"));
         assertTrue(result.contains("регион: Москва"));
+        assertTrue(result.contains("Чтобы посмотреть погоду: /stats")); // ← погода в ответе
     }
 
     @Test
@@ -91,17 +107,16 @@ class SetCityCommandTest {
 
         // THEN
         verify(mockDatabaseManager, never()).updateUserCity(anyLong(), anyString());
+        // Погода НЕ запрашивается, если город не найден
+        verify(mockWeatherService, never()).getTodayForecast(anyString());
+
         assertTrue(result.contains("❌ Город не найден в России"));
         assertTrue(result.contains("Пример: `/setcity Новосибирск`"));
     }
 
     @Test
     void getDetailedHelp_returnsCorrectMarkdown() {
-        // WHEN
         String help = setCityCommand.getDetailedHelp();
-        System.out.println(help);
-
-        // THEN
         assertTrue(help.contains("*🏙 Команда /setcity - Установка или просмотр вашего города*"));
         assertTrue(help.contains("`/setcity <название>`"));
         assertTrue(help.contains("Поддерживается нечёткий поиск"));

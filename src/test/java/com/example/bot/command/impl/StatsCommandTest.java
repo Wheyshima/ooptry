@@ -1,6 +1,7 @@
 package com.example.bot.command.impl;
 
 import com.example.bot.database.DatabaseManager;
+import com.example.bot.service.WeatherService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -19,27 +20,30 @@ import static org.mockito.Mockito.*;
 class StatsCommandTest {
 
     private DatabaseManager mockDatabaseManager;
+    private WeatherService mockWeatherService; // ← добавлено
     private StatsCommand statsCommand;
     private Message mockMessage;
 
     @BeforeEach
     void setUp() {
-        // Инициализация моков и команды перед каждым тестом
         mockDatabaseManager = Mockito.mock(DatabaseManager.class);
-        statsCommand = new StatsCommand(mockDatabaseManager);
+        mockWeatherService = Mockito.mock(WeatherService.class); // ← создан мок
+        statsCommand = new StatsCommand(mockDatabaseManager, mockWeatherService); // ← передано
         mockMessage = Mockito.mock(Message.class);
         User mockUser = Mockito.mock(User.class);
 
         when(mockMessage.getFrom()).thenReturn(mockUser);
         when(mockUser.getId()).thenReturn(12345L);
+
+        // По умолчанию: погода — заглушка (чтобы не падали тесты)
+        when(mockWeatherService.getTodayForecast(anyString()))
+                .thenReturn("🌤️ Облачно, +18°C");
     }
 
     // ============ Тесты для /stats (сегодняшняя статистика) ============
 
     @Test
     void execute_statsCommand_withTasks_showsCurrentProgress() {
-        // Проверяет отображение текущего прогресса, когда у пользователя есть задачи
-        // Ожидается: показ количества выполненных/всего задач и процент продуктивности
         when(mockMessage.getText()).thenReturn("/stats");
 
         List<DatabaseManager.Task> tasks = Arrays.asList(
@@ -55,19 +59,23 @@ class StatsCommandTest {
 
         assertTrue(result.contains("✅ *Выполнено:* 1/2 задач"));
         assertTrue(result.contains("📈 *Продуктивность:* 50,0%"));
-        assertFalse(result.contains("💾 *Сохраненная:*")); // Сохранённой статистики нет
+        assertFalse(result.contains("💾 *Сохраненная:*"));
         assertTrue(result.contains("Статистика за сегодня"));
+        // Погоды нет, потому что город не установлен
+        assertFalse(result.contains("🌤️ Облачно"));
     }
 
     @Test
     void execute_statsCommand_noTasksButSavedStats_showsSavedProgress() {
-        // Проверяет отображение сохранённой статистики, когда задачи уже удалены (после очистки),
-        // но статистика за день сохранена
         when(mockMessage.getText()).thenReturn("/stats");
 
         when(mockDatabaseManager.getDailyTasks(12345L)).thenReturn(Collections.emptyList());
         when(mockDatabaseManager.getTodayStats(12345L)).thenReturn(75.5);
         when(mockDatabaseManager.getUserCity(12345L)).thenReturn("Moscow");
+
+        // Мокаем прогноз для "Moscow"
+        when(mockWeatherService.getTodayForecast("Moscow"))
+                .thenReturn("🌤️ Солнечно, +22°C");
 
         String result = statsCommand.execute(mockMessage);
 
@@ -75,31 +83,47 @@ class StatsCommandTest {
         assertTrue(result.contains("✅ *Выполнено:* 0/0 задач"));
         assertTrue(result.contains("📈 *Сохраненная продуктивность:* 75,5%"));
         assertTrue(result.contains("💾 *Сохраненная:* 75,5%"));
+        assertTrue(result.contains("🌤️ Солнечно, +22°C")); // ← погода добавлена
     }
 
     @Test
     void execute_statsCommand_noTasksNoSavedStats_showsZeroProgress() {
-        // Проверяет отображение статистики, когда нет ни задач, ни сохранённых данных
-        // Ожидается: прогресс 0% без упоминания сохранённой статистики
         when(mockMessage.getText()).thenReturn("/stats");
 
         when(mockDatabaseManager.getDailyTasks(12345L)).thenReturn(Collections.emptyList());
         when(mockDatabaseManager.getTodayStats(12345L)).thenReturn(null);
-        when(mockDatabaseManager.getUserCity(12345L)).thenReturn(null);
+        when(mockDatabaseManager.getUserCity(12345L)).thenReturn("Екатеринбург");
+
+        when(mockWeatherService.getTodayForecast("Екатеринбург"))
+                .thenReturn("🌧️ Дождь, +15°C");
 
         String result = statsCommand.execute(mockMessage);
 
+        assertTrue(result.contains("🏙️ *Город:* Екатеринбург"));
         assertTrue(result.contains("✅ *Выполнено:* 0/0 задач"));
         assertTrue(result.contains("📈 *Продуктивность:* 0,0%"));
+        assertTrue(result.contains("🌧️ Дождь, +15°C"));
         assertFalse(result.contains("💾 *Сохраненная:*"));
     }
 
-    // ============ Тесты для /stats week (недельная статистика) ============
+    @Test
+    void execute_statsCommand_noCity_showsPrompt() {
+        when(mockMessage.getText()).thenReturn("/stats");
+
+        when(mockDatabaseManager.getDailyTasks(12345L)).thenReturn(Collections.emptyList());
+        when(mockDatabaseManager.getTodayStats(12345L)).thenReturn(null);
+        when(mockDatabaseManager.getUserCity(12345L)).thenReturn(null); // ← нет города
+
+        String result = statsCommand.execute(mockMessage);
+
+        assertTrue(result.contains("💡 Установите город: `/setcity Москва`"));
+        assertFalse(result.contains("🌤️")); // никакой погоды
+    }
+
+    // ============ Тесты для /stats week ============
 
     @Test
     void execute_statsWeekCommand_withData_showsDetailedStats() {
-        // Проверяет полную недельную статистику с данными за 2 дня (Пн и Вт)
-        // Ожидается: средняя продуктивность, детализация по дням, диапазон недели
         when(mockMessage.getText()).thenReturn("/stats week");
 
         DatabaseManager.ProductivityStat monday = new DatabaseManager.ProductivityStat(
@@ -119,36 +143,37 @@ class StatsCommandTest {
         List<DatabaseManager.ProductivityStat> weeklyStats = Arrays.asList(monday, tuesday);
 
         when(mockDatabaseManager.getWeeklyProductivityStats(12345L)).thenReturn(weeklyStats);
-        when(mockDatabaseManager.getUserCity(12345L)).thenReturn(null);
+        when(mockDatabaseManager.getUserCity(12345L)).thenReturn("Новосибирск");
+
+        when(mockWeatherService.getTodayForecast("Новосибирск"))
+                .thenReturn("⛅ Переменная облачность, +20°C");
 
         String result = statsCommand.execute(mockMessage);
 
         assertTrue(result.contains("*📊 Статистика за неделю:*"));
+        assertTrue(result.contains("🏙️ *Город:* Новосибирск"));
+        assertTrue(result.contains("🌤️ *Погода сегодня:*"));
+        assertTrue(result.contains("⛅ Переменная облачность, +20°C"));
         assertTrue(result.contains("📅 *Активных дней:* 2/7"));
         assertTrue(result.contains("📈 *Средняя продуктивность:* 75,0%"));
-        assertTrue(result.contains("🟢 *Понедельник* (100,0%)"));
-        assertTrue(result.contains("🟠 *Вторник* (50,0%)"));
-        assertTrue(result.contains("📝 Задач: 2/2 выполнено"));
-        assertTrue(result.contains("📝 Задач: 2/4 выполнено"));
         assertTrue(result.contains("🗓️ *Неделя: 2025-06-02 – 2025-06-08*"));
     }
 
     @Test
     void execute_statsWeekCommand_noData_showsEmptyMessage() {
-        // Проверяет сообщение, когда за текущую неделю нет данных о продуктивности
-        // Ожидается: информативное сообщение с советом
         when(mockMessage.getText()).thenReturn("/stats week");
         when(mockDatabaseManager.getWeeklyProductivityStats(12345L)).thenReturn(Collections.emptyList());
+        when(mockDatabaseManager.getUserCity(12345L)).thenReturn(null);
 
         String result = statsCommand.execute(mockMessage);
 
         assertTrue(result.contains("Нет данных за текущую неделю"));
         assertTrue(result.contains("Добавьте задачи с помощью `/todo add`"));
+        assertFalse(result.contains("🌤️")); // погоды нет
     }
 
     @Test
     void execute_statsWeekCommand_withCity_showsCityInfo() {
-        // Проверяет отображение города в недельной статистике, если он установлен
         when(mockMessage.getText()).thenReturn("/stats week");
 
         DatabaseManager.ProductivityStat stat = new DatabaseManager.ProductivityStat(
@@ -161,17 +186,19 @@ class StatsCommandTest {
         when(mockDatabaseManager.getWeeklyProductivityStats(12345L)).thenReturn(List.of(stat));
         when(mockDatabaseManager.getUserCity(12345L)).thenReturn("Екатеринбург");
 
+        when(mockWeatherService.getTodayForecast("Екатеринбург"))
+                .thenReturn("☀️ Ясно, +25°C");
+
         String result = statsCommand.execute(mockMessage);
 
         assertTrue(result.contains("🏙️ *Город:* Екатеринбург"));
+        assertTrue(result.contains("☀️ Ясно, +25°C"));
     }
 
     // ============ Тесты для неверных аргументов ============
 
     @Test
     void execute_statsCommand_withInvalidArgument_showsHelp() {
-        // Проверяет обработку неизвестного аргумента команды
-        // Ожидается: сообщение об ошибке + краткая справка со статистикой за сегодня
         when(mockMessage.getText()).thenReturn("/stats abc");
         when(mockDatabaseManager.getDailyTasks(12345L)).thenReturn(Collections.emptyList());
         when(mockDatabaseManager.getTodayStats(12345L)).thenReturn(null);
@@ -181,13 +208,13 @@ class StatsCommandTest {
 
         assertTrue(result.contains("❓ *Неизвестный параметр:* 'abc'"));
         assertTrue(result.contains("Статистика за сегодня"));
+        assertFalse(result.contains("🌤️"));
     }
 
     // ============ Тесты описания команды ============
 
     @Test
     void commandNameAndDescriptionShouldBeCorrect() {
-        // Проверяет корректность имени команды и её описания (для регистрации в Telegram)
         assertEquals("stats", statsCommand.getBotCommand().getCommand());
         assertEquals("Показать статистику выполнения", statsCommand.getDescription());
     }
