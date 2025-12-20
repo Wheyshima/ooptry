@@ -19,14 +19,15 @@ public class WishlistCommand extends AbstractCommand {
 
     @Override
     public String execute(Message message) {
-        String argument = getCommandArgument(message).trim();
+        String argument = getCommandArgument(message); // ← НЕ вызываем .trim() здесь!
         Long userId = message.getFrom().getId();
 
         // Проверяем блокировку
         if (databaseManager.isWishlistLocked(userId)) {
-            // Разрешаем только эти команды при блокировке
-            if (argument.startsWith("complete ") || argument.equals("status") || argument.isEmpty()) {
-                // Эти команды разрешены при блокировке
+            if (getCommandAction(argument).equals("complete") ||
+                    argument.equals("status") ||
+                    argument.isEmpty()) {
+                // Разрешено
             } else {
                 return getLockedMessage(userId);
             }
@@ -36,41 +37,50 @@ public class WishlistCommand extends AbstractCommand {
             return showWishes(userId);
         }
 
-        if (argument.startsWith("add ")) {
-            String wishText = argument.substring(4).trim();
-
-            // Валидация текста желания
-            if (wishText.isEmpty()) {
-                return "❌ Текст желания не может быть пустым";
-            }
-            if (wishText.length() > 1000) {
-                return "❌ Текст желания слишком длинный (максимум 1000 символов)";
-            }
-            if (wishText.length() < 2) {
-                return "❌ Текст желания слишком короткий (минимум 2 символа)";
-            }
-
-            return addWish(userId, wishText);
+        return switch (getCommandAction(argument)) {
+            case "add" -> handleAddWish(userId, getActionArgument(argument, "add"));
+            case "complete" -> handleCompleteWish(userId, getActionArgument(argument, "complete"));
+            case "endadd" -> endAddWishes(userId);
+            case "status" -> getLockStatus(userId);
+            default -> getUsage();
+        };
+    }
+    /**
+     * Извлекает аргумент действия (текст после команды)
+     */
+    private String getActionArgument(String argument, String action) {
+        if (argument.startsWith(action + " ")) {
+            return argument.substring((action + " ").length()).trim();
         }
-
-        if (argument.equals("endadd")) {
-            return endAddWishes(userId);
+        return ""; // если нет аргумента (например, "/wishlist add" без текста)
+    }
+    private String getCommandAction(String argument) {
+        if (argument.startsWith("add ") || argument.equals("add")) return "add";
+        if (argument.startsWith("complete ")) return "complete";
+        if (argument.equals("endadd")) return "endadd";
+        if (argument.equals("status")) return "status";
+        return "unknown";
+    }
+    private String handleAddWish(Long userId, String wishText) {
+        if (wishText.isEmpty()) {
+            return "❌ Текст желания не может быть пустым";
         }
-
-        if (argument.startsWith("complete ")) {
-            try {
-                int wishId = Integer.parseInt(argument.substring(9).trim());
-                return completeWish(userId, wishId);
-            } catch (NumberFormatException e) {
-                return "❌ Неверный формат ID желания. Используйте: `/wishlist complete <число>`";
-            }
+        if (wishText.length() > 1000) {
+            return "❌ Текст желания слишком длинный (максимум 1000 символов)";
         }
-
-        if (argument.equals("status")) {
-            return getLockStatus(userId);
+        if (wishText.length() < 2) {
+            return "❌ Текст желания слишком короткий (минимум 2 символа)";
         }
+        return addWish(userId, wishText);
+    }
 
-        return getUsage();
+    private String handleCompleteWish(Long userId, String taskIdArg) {
+        try {
+            int displayIndex = Integer.parseInt(taskIdArg.trim());
+            return completeWish(userId, displayIndex);
+        } catch (NumberFormatException e) {
+            return "❌ Неверный формат ID желания. Используйте: `/wishlist complete <число>`";
+        }
     }
 
     @Override
@@ -105,7 +115,7 @@ public class WishlistCommand extends AbstractCommand {
             • автоматическое обновление через 2 месяца
         
             *✅ отслеживание (всегда доступно):*
-            `/wishlist` - созерцать карту предначертаний
+            /wishlist - созерцать карту предначертаний
             `/wishlist complete <ID>` - отметить исполнение желания
             `/wishlist stats` - статистика вашего духовного пути
         
@@ -128,13 +138,13 @@ public class WishlistCommand extends AbstractCommand {
             3. *фаза обновления* - автоматическое обновление цикла
         
             📈 *команды для глубокой работы:*
-            `/wishlist` - основная карта с визуализацией
+            /wishlist - основная карта с визуализацией
             `/wishlist endadd` - хронология вашего развития
             `/wishlist completed` - галерея ваших побед
             `/wishlist stats` - текущие вызовы вселенной
         
             💫 *начните духовный путь:*
-            напишите `/wishlist` чтобы прикоснуться к своей судьбе
+            напишите /wishlist чтобы прикоснуться к своей судьбе
             или сразу начните с первого желания:
             `/wishlist add <ваше самое сокровенное стремление>`
         
@@ -160,9 +170,11 @@ public class WishlistCommand extends AbstractCommand {
 
         StringBuilder sb = new StringBuilder("🌟 *Ваша карта желаний:*\n\n");
 
+        int displayIndex = 1;
         for (DatabaseManager.Wish wish : wishes) {
             String status = wish.isCompleted() ? "✅" : "🎯";
-            sb.append(String.format("%s [#%d] %s\n", status, wish.getId(), wish.getText()));
+            sb.append(String.format("%s [#%d] %s\n", status, displayIndex, wish.getText()));
+            displayIndex++;
         }
 
         // Добавляем информацию о блокировке
@@ -192,24 +204,32 @@ public class WishlistCommand extends AbstractCommand {
     }
 
     private String addWish(Long userId, String wishText) {
-        int wishId = databaseManager.addWish(userId, wishText, null);
+        int wishId = databaseManager.addWish(userId, wishText);
         if (wishId != -1) {
             return "✨ *Желание добавлено!*\n\n" +
-                    "🔢 ID: #" + wishId + "\n" +
                     "📝 Текст: " + wishText + "\n\n" +
                     "💡 Когда закончите добавлять, используйте:\n`/wishlist endadd`";
         }
         return "❌ Ошибка добавления желания";
     }
 
-    private String completeWish(Long userId, int wishId) {
-        if (databaseManager.completeWish(userId, wishId)) {
-            return "🎉 *Желание #" + wishId + " отмечено выполненным!*\n\n" +
+    private String completeWish(Long userId, int displayIndex) {
+        List<DatabaseManager.Wish> wishes = databaseManager.getWishes(userId);
+
+        if (displayIndex < 1 || displayIndex > wishes.size()) {
+            return "❌ Неверный номер желания. У вас всего " + wishes.size() + " желаний.";
+        }
+
+        DatabaseManager.Wish wish = wishes.get(displayIndex - 1);
+        int realWishId = wish.getId();
+
+        if (databaseManager.completeWish(userId, realWishId)) {
+            return "🎉 *Желание #" + displayIndex + " отмечено выполненным!*\n\n" +
                     "✨ Вы сделали это! Вселенная отмечает вашу победу!\n" +
-                    "Продолжайте в том же духе: `/wishlist`";
+                    "Продолжайте в том же духе: /wishlist";
         } else {
-            return "❌ Желание #" + wishId + " не найдено или уже выполнено\n" +
-                    "Проверьте актуальный список: `/wishlist`";
+            return "❌ Желание #" + displayIndex + " не найдено или уже выполнено\n" +
+                    "Проверьте актуальный список: /wishlist";
         }
     }
 
@@ -221,7 +241,7 @@ public class WishlistCommand extends AbstractCommand {
                     "⏰ Срок блокировки истекает: " + lockUntil.format(formatter) + "\n" +
                     "📅 Осталось дней: " + daysLeft + "\n\n" +
                     "Вы можете:\n" +
-                    "• Просматривать желания `/wishlist`\n" +
+                    "• Просматривать желания /wishlist\n" +
                     "• Отмечать выполненные `/wishlist complete <ID>`\n" +
                     "• Проверить статус `/wishlist status`";
         }
@@ -238,7 +258,7 @@ public class WishlistCommand extends AbstractCommand {
                     "Вы можете:\n" +
                     "• Добавлять новые: `/wishlist add <желание>`\n" +
                     "• Завершить добавление: `/wishlist endadd`\n" +
-                    "• Просмотреть список: `/wishlist`";
+                    "• Просмотреть список: /wishlist";
         }
     }
 
@@ -255,6 +275,7 @@ public class WishlistCommand extends AbstractCommand {
         databaseManager.lockWishlist(userId);
 
         // Проверяем действительно ли заблокировано
+
         boolean isActuallyLocked = databaseManager.isWishlistLocked(userId);
         System.out.println("🔍 Проверка блокировки: " + isActuallyLocked);
 
@@ -262,7 +283,7 @@ public class WishlistCommand extends AbstractCommand {
 
         return "🎉 *Карта желаний сохранена и заблокирована!*\n\n" +
                 "📊 Всего желаний: " + wishCount + "\n" +
-                "⏰ Срок блокировки: "+DatabaseManager.WISHLIST_LOCK_DAYS + " дней\n" +
+                "⏰ Срок блокировки: " + DatabaseManager.WISHLIST_LOCK_DAYS + " дней\n" +
                 "📅 Разблокировка: " + (lockUntil != null ? lockUntil.format(formatter) : "через " + DatabaseManager.WISHLIST_LOCK_DAYS +" дней") + "\n\n" +
 
                 "🔒 Теперь вы не можете добавлять новые желания\n" +
@@ -275,7 +296,7 @@ public class WishlistCommand extends AbstractCommand {
         return """
         🎯 *Управление картой желаний:*
         
-        • `/wishlist` - показать все желания
+        • /wishlist - показать все желания
         • `/wishlist add <текст>` - добавить желание
         • `/wishlist endadd` - ✅ ЗАВЕРШИТЬ и заблокировать (2 месяца)
         • `/wishlist complete <ID>` - отметить выполненным

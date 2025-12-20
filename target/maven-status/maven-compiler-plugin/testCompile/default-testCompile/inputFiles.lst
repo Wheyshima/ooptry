@@ -1,5 +1,12 @@
-C:\Users\orbiz\IdeaProjects\oop_new_try\src\test\java\com\example\bot\command\impl\AuthorsCommandTest.java
-C:\Users\orbiz\IdeaProjects\oop_new_try\src\test\java\com\example\bot\command\impl\HelpCommandTest.java
-C:\Users\orbiz\IdeaProjects\oop_new_try\src\test\java\com\example\bot\command\impl\AboutCommandTest.java
-C:\Users\orbiz\IdeaProjects\oop_new_try\src\test\java\com\example\bot\command\impl\StartCommandTest.java
-C:\Users\orbiz\IdeaProjects\oop_new_try\src\test\java\com\example\bot\ChatBotTest.java
+C:\Users\orbiz\Desktop\oop_new_try1\src\test\java\com\example\bot\command\CommandRegistryTest.java
+C:\Users\orbiz\Desktop\oop_new_try1\src\test\java\com\example\bot\command\impl\AuthorsCommandTest.java
+C:\Users\orbiz\Desktop\oop_new_try1\src\test\java\com\example\bot\command\impl\StartCommandTest.java
+C:\Users\orbiz\Desktop\oop_new_try1\src\test\java\com\example\bot\database\DatabaseManagerIntegrationTest.java
+C:\Users\orbiz\Desktop\oop_new_try1\src\test\java\com\example\bot\command\impl\AboutCommandTest.java
+C:\Users\orbiz\Desktop\oop_new_try1\src\test\java\com\example\bot\command\impl\SetCityCommandTest.java
+C:\Users\orbiz\Desktop\oop_new_try1\src\test\java\com\example\bot\command\impl\HelpCommandTest.java
+C:\Users\orbiz\Desktop\oop_new_try1\src\test\java\com\example\bot\command\impl\TodoCommandTest.java
+C:\Users\orbiz\Desktop\oop_new_try1\src\test\java\com\example\bot\command\impl\StatsCommandTest.java
+C:\Users\orbiz\Desktop\oop_new_try1\src\test\java\com\example\bot\command\AbstractCommandTest.java
+C:\Users\orbiz\Desktop\oop_new_try1\src\test\java\com\example\bot\command\impl\WishlistCommandTest.java
+C:\Users\orbiz\Desktop\oop_new_try1\src\test\java\com\example\bot\ChatBotTest.java
