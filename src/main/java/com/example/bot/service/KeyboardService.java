@@ -22,6 +22,7 @@ public class KeyboardService {
         KeyboardRow row3 = new KeyboardRow();
         row3.add("/about");
         row3.add("/authors");
+        row3.add("/menu");
 
         return ReplyKeyboardMarkup.builder()
                 .keyboard(List.of(row1, row2, row3))

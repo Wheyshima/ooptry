@@ -9,7 +9,7 @@ import java.util.List;
 
 public class TodoCommand extends AbstractCommand {
     private final DatabaseManager databaseManager;
-    private final UserStateService userStateService;
+    private UserStateService userStateService;
 
     // Константы для валидации
     private static final int MIN_TASK_LENGTH = 2;
@@ -20,13 +20,21 @@ public class TodoCommand extends AbstractCommand {
         this.databaseManager = databaseManager;
         this.userStateService = userStateService;
     }
-
+    // В TodoCommand.java
+    public void setUserStateService(UserStateService userStateService) {
+        this.userStateService = userStateService;
+    }
     @Override
     public String execute(Message message) {
-        String argument = getCommandArgument(message).trim();
+        // Защита от null
+        if (message == null || message.getFrom() == null) {
+            return "❌ Не удалось определить пользователя. Используйте бота в личных сообщениях.";
+        }
         Long userId = message.getFrom().getId();
+        String argument = getCommandArgument(message).trim();
 
-        if (userStateService.hasActiveState(userId)) {
+        // Безопасная проверка состояния
+        if (userStateService != null && userStateService.hasActiveState(userId)) {
             userStateService.cancelUserState(userId);
             return "⚠️ Предыдущее действие отменено. Обрабатываю новую команду...";
         }
@@ -80,7 +88,7 @@ public class TodoCommand extends AbstractCommand {
         return "❌ Ошибка добавления задачи";
     }
 
-    private String handleCompleteTask(Long userId, String taskIdArg) {
+    public String handleCompleteTask(Long userId, String taskIdArg) {
         try {
             int displayIndex = Integer.parseInt(taskIdArg);
             List<DatabaseManager.Task> tasks = databaseManager.getDailyTasks(userId);
@@ -110,8 +118,12 @@ public class TodoCommand extends AbstractCommand {
             if (displayIndex < 1 || displayIndex > tasks.size()) {
                 return "❌ Неверный номер задачи. \nУ вас всего " + tasks.size() + " задач.\nПросмотреть все задачи: /todo";
             }
+
             DatabaseManager.Task task = tasks.get(displayIndex - 1);
             int realTaskId = task.getId();
+
+            System.out.println("Начинаем редактирование задачи #{} (realId={}) для пользователя {}"+ displayIndex+ realTaskId+ userId);
+
             return startTaskEdit(userId, realTaskId);
         } catch (NumberFormatException e) {
             return "❌ Неверный формат ID задачи. \nИспользуйте: `/todo edit <число>`";
@@ -138,6 +150,11 @@ public class TodoCommand extends AbstractCommand {
     }
 
     private String startTaskEdit(Long userId, int realTaskId) {
+        if (userStateService == null) {
+            System.out.println("userStateService == null при попытке редактирования задачи {} для пользователя {}"+ realTaskId+ userId);
+            return "❌ Внутренняя ошибка. Попробуйте позже.";
+        }
+
         if (userStateService.hasActiveState(userId)) {
             userStateService.cancelUserState(userId);
             return "⚠️ Предыдущее действие отменено. Начинаем новое редактирование...";
@@ -145,13 +162,12 @@ public class TodoCommand extends AbstractCommand {
 
         List<DatabaseManager.Task> tasks = databaseManager.getDailyTasks(userId);
 
-        // Находим задачу и её позицию (порядковый номер)
         DatabaseManager.Task targetTask = null;
         int displayIndex = -1;
         for (int i = 0; i < tasks.size(); i++) {
             if (tasks.get(i).getId() == realTaskId) {
                 targetTask = tasks.get(i);
-                displayIndex = i + 1; // 1-based
+                displayIndex = i + 1;
                 break;
             }
         }
@@ -174,17 +190,21 @@ public class TodoCommand extends AbstractCommand {
         userStateService.startTodoEditState(userId, realTaskId);
 
         return """
-            ✏️ *Редактирование задачи #%d*
-            
-            📝 *Текущий текст:* %s
-            
-            ✍️ *Введите новый текст задачи:*
-            ▪ Просто напишите новый текст и отправьте сообщение
-            ▪ Или отправьте 'отмена' для отмены редактирования
-            """.formatted(displayIndex, targetTask.getText());
+        ✏️ *Редактирование задачи #%d*
+        
+        📝 *Текущий текст:* %s
+        
+        ✍️ *Введите новый текст задачи:*
+        ▪ Просто напишите новый текст и отправьте сообщение
+        ▪ Или отправьте 'отмена' для отмены редактирования
+        """.formatted(displayIndex, targetTask.getText());
     }
 
     public String handleEditInput(Long userId, int realTaskId, String newText) {
+        if (newText == null || newText.trim().isEmpty()) {
+            return "❌ Новый текст не может быть пустым.";
+        }
+
         String validationError = validateTaskText(newText);
         if (validationError != null) {
             return validationError;
@@ -193,6 +213,7 @@ public class TodoCommand extends AbstractCommand {
         List<DatabaseManager.Task> tasks = databaseManager.getDailyTasks(userId);
         DatabaseManager.Task targetTask = null;
         int displayIndex = -1;
+
         for (int i = 0; i < tasks.size(); i++) {
             if (tasks.get(i).getId() == realTaskId) {
                 targetTask = tasks.get(i);
@@ -202,7 +223,7 @@ public class TodoCommand extends AbstractCommand {
         }
 
         if (targetTask == null) {
-            return "❌ Задача #"+ displayIndex +" не найдена. Возможно, она уже истекла.\nПроверьте актуальный список задач: /todo";
+            return "❌ Задача #" + displayIndex + " не найдена. Возможно, она уже истекла.\nПроверьте актуальный список задач: /todo";
         }
 
         if (targetTask.isCompleted()) {
@@ -224,7 +245,6 @@ public class TodoCommand extends AbstractCommand {
                     "Попробуйте еще раз или проверьте список задач: /todo";
         }
     }
-
     /**
      * Сохраняет статистику пользователя
      */

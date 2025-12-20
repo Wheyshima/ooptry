@@ -1,4 +1,3 @@
-
 package com.example.bot.command;
 
 import com.example.bot.command.impl.AboutCommand;

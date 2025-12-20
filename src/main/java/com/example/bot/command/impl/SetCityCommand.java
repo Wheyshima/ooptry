@@ -4,16 +4,19 @@ import com.example.bot.command.AbstractCommand;
 import com.example.bot.database.DatabaseManager;
 import com.example.bot.model.City;
 import com.example.bot.service.CityService;
+import com.example.bot.service.WeatherService;
 import org.telegram.telegrambots.meta.api.objects.Message;
 
 public class SetCityCommand extends AbstractCommand {
     private final DatabaseManager databaseManager;
     private final CityService cityService;
+    private final WeatherService weatherService;
 
-    public SetCityCommand(DatabaseManager databaseManager, CityService cityService) {
+    public SetCityCommand(DatabaseManager databaseManager, CityService cityService,WeatherService weatherService) {
         super("setcity", "установить или посмотреть ваш город в России");
         this.databaseManager = databaseManager;
         this.cityService = cityService;
+        this.weatherService = weatherService;
     }
 
     @Override
@@ -40,7 +43,6 @@ public class SetCityCommand extends AbstractCommand {
         • Город можно изменить в любой момент
         """;
     }
-
     @Override
     public String execute(Message message) {
         String rawInput = getCommandArgument(message).trim();
@@ -50,9 +52,11 @@ public class SetCityCommand extends AbstractCommand {
         if (rawInput.isEmpty()) {
             String currentCity = databaseManager.getUserCity(userId);
             if (currentCity != null && !currentCity.isBlank()) {
+                String weather = weatherService.getTodayForecast(currentCity);
                 return String.format(
-                        "Ваш текущий город: *%s*\nЧтобы изменить, используйте:\n`/setcity <новый город>`",
-                        currentCity
+                        "Ваш текущий город: *%s*\n\n🌤️ *Погода сегодня:*\n%s\n\nХотите изменить город?",
+                        currentCity,
+                        weather
                 );
             } else {
                 return """
@@ -63,7 +67,6 @@ public class SetCityCommand extends AbstractCommand {
                 """;
             }
         }
-
         // Если аргумент есть — пытаемся установить новый город
         City matchedCity = cityService.findCity(rawInput);
 
@@ -81,12 +84,10 @@ public class SetCityCommand extends AbstractCommand {
             -> Введите ближайщий к вам город входящий в топ 100 по населению
             """;
         }
-
         // Сохраняем нормализованное название
         databaseManager.updateUserCity(userId, matchedCity.getName());
-
         return String.format(
-                "✅ Город успешно установлен:\n*%s*\nрегион: %s",
+                "✅ Город установлен: *%s*\nрегион: %s\nЧтобы посмотреть погоду: /stats",
                 matchedCity.getName(),
                 matchedCity.getRegion()
         );

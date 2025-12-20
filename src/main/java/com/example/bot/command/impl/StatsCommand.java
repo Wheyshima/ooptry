@@ -2,30 +2,22 @@ package com.example.bot.command.impl;
 
 import com.example.bot.command.AbstractCommand;
 import com.example.bot.database.DatabaseManager;
+import com.example.bot.service.WeatherService;
 import org.telegram.telegrambots.meta.api.objects.Message;
-import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup;
-import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton;
 
 import java.util.List;
 import java.time.LocalDate;
 
 public class StatsCommand extends AbstractCommand {
     private final DatabaseManager databaseManager;
+    private final WeatherService weatherService;
 
-    public StatsCommand(DatabaseManager databaseManager) {
+    public StatsCommand(DatabaseManager databaseManager,WeatherService weatherService) {
         super("stats", "Показать статистику выполнения");
         this.databaseManager = databaseManager;
+        this.weatherService = weatherService;
     }
-    public static InlineKeyboardMarkup getWeekStatsKeyboard() {
-        InlineKeyboardButton weekButton = InlineKeyboardButton.builder()
-                .text("📊 Посмотреть за неделю")
-                .callbackData("stats:week")
-                .build();
 
-        return InlineKeyboardMarkup.builder()
-                .keyboardRow(List.of(weekButton))
-                .build();
-    }
     @Override
     public String getDetailedHelp() {
         return """
@@ -75,7 +67,13 @@ public class StatsCommand extends AbstractCommand {
 
         StringBuilder sb = new StringBuilder("*📊 Статистика за сегодня:*\n\n");
         // Добавляем город если установлен
-        appendCityInfo(sb, city);
+        if (isValidCity(city)) {
+            sb.append("🏙️ *Город:* ").append(city).append("\n");
+            String weather = weatherService.getTodayForecast(city);
+            sb.append("🌤️ *Погода:*\n").append(weather).append("\n\n");
+        } else {
+            sb.append("💡 Установите город: `/setcity Москва`\n\n");
+        }
         // Получаем текущие задачи для отображения счетчика
         var tasks = databaseManager.getDailyTasks(userId);
         int totalTasks = tasks.size();
@@ -134,8 +132,10 @@ public class StatsCommand extends AbstractCommand {
         StringBuilder sb = new StringBuilder("*📊 Статистика за неделю:*\n\n");
 
         // Город
-        if (city != null && !city.trim().isEmpty()) {
+        if (isValidCity(city)) {
             sb.append("🏙️ *Город:* ").append(city).append("\n");
+            String weather = weatherService.getTodayForecast(city);
+            sb.append("🌤️ *Погода сегодня:*\n").append(weather).append("\n\n");
         }
 
         // Средняя продуктивность
@@ -182,15 +182,6 @@ public class StatsCommand extends AbstractCommand {
         }
 
         return sb.toString();
-    }
-
-    /**
-     * Добавляет информацию о городе в StringBuilder
-     */
-    private void appendCityInfo(StringBuilder sb, String city) {
-        if (isValidCity(city)) {
-            sb.append("🏙️ *Город:* ").append(city).append("\n");
-        }
     }
 
     /**

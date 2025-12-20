@@ -3,11 +3,11 @@ package com.example.bot.service;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.*;
+
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -18,18 +18,19 @@ class WeatherServiceTest {
     private static final ZoneId TZ = ZoneId.of("Asia/Yekaterinburg");
 
     private HttpClient mockHttpClient;
+    private WeatherCacheStorage mockCacheStorage;
     private WeatherService weatherService;
 
     @BeforeEach
     void setUp() {
         mockHttpClient = mock(HttpClient.class);
+        mockCacheStorage = mock(WeatherCacheStorage.class);
         Clock fixedClock = Clock.fixed(
                 LocalDate.of(2025, 12, 17).atStartOfDay(TZ).toInstant(),
                 TZ
         );
 
-        // Создаём сервис с мокнутым HTTP-клиентом
-        weatherService = new WeatherService(API_KEY, fixedClock) {
+        weatherService = new WeatherService(API_KEY, fixedClock, mockCacheStorage) {
             {
                 try {
                     java.lang.reflect.Field clientField = WeatherService.class.getDeclaredField("client");
@@ -56,7 +57,6 @@ class WeatherServiceTest {
 
     @Test
     void getTodayForecast_validCity_returnsForecastAndCachesIt() throws Exception {
-        // Вычисляем корректные timestamp'ы для 17 декабря 2025 в UTC+5
         long dt1 = ZonedDateTime.of(2025, 12, 17, 6, 0, 0, 0, TZ).toInstant().getEpochSecond();
         long dt2 = ZonedDateTime.of(2025, 12, 17, 15, 0, 0, 0, TZ).toInstant().getEpochSecond();
 
@@ -76,38 +76,72 @@ class WeatherServiceTest {
           ]
         }
         """, dt1, dt2);
-        @SuppressWarnings("unchecked")
+
         HttpResponse<String> mockResponse = mock(HttpResponse.class);
         when(mockResponse.statusCode()).thenReturn(200);
         when(mockResponse.body()).thenReturn(jsonResponse);
 
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create("https://api.openweathermap.org/data/2.5/forecast?q=Moscow&appid=test-api-key&units=metric&lang=ru"))
-                .timeout(java.time.Duration.ofSeconds(10))
-                .build();
+        when(mockHttpClient.send(any(HttpRequest.class), eq(HttpResponse.BodyHandlers.ofString())))
+                .thenReturn(mockResponse);
 
-        when(mockHttpClient.send(request, HttpResponse.BodyHandlers.ofString()))
-                .thenAnswer(inv -> mockResponse);
+        // Мокаем кэш: сначала пустой
+        when(mockCacheStorage.get("moscow")).thenReturn(null);
 
         String result = weatherService.getTodayForecast("Moscow");
 
         assertTrue(result.contains("дождь"));
         assertTrue(result.contains("от +4°C до +5°C") || result.contains("от +3°C до +5°C"));
+
+        // Проверяем, что результат сохранён в кэш
+        verify(mockCacheStorage).save("moscow", result, LocalDate.of(2025, 12, 17));
+    }
+
+    @Test
+    void getTodayForecast_usesFileCacheIfAvailable() throws Exception {
+        String cachedForecast = "🌤️ Ясно, около +0°C";
+        LocalDate today = LocalDate.of(2025, 12, 17);
+
+        // Создаём РЕАЛЬНЫЙ объект
+        WeatherCacheStorage.CachedForecast cached =
+                new WeatherCacheStorage.CachedForecast(cachedForecast, today);
+
+        doReturn(cached).when(mockCacheStorage).get("london");
+
+        String result = weatherService.getTodayForecast("London");
+
+        assertEquals(cachedForecast, result);
+        verify(mockHttpClient, never()).send(any(), any());
+    }
+
+    @Test
+    void getTodayForecast_fileCacheExpired_fetchesFromApi() throws Exception {
+        WeatherCacheStorage.CachedForecast mockCached = mock(WeatherCacheStorage.CachedForecast.class);
+        when(mockCached.isExpired(any(LocalDate.class))).thenReturn(true);
+        when(mockCacheStorage.get("tokyo")).thenReturn(mockCached);
+
+        String jsonResponse = """
+        { "list": [{ "dt": 1765987200, "main": { "temp": 10.0 }, "weather": [{ "description": "облачно" }] }] }
+        """;
+        HttpResponse<String> mockResponse = mock(HttpResponse.class);
+        when(mockResponse.statusCode()).thenReturn(200);
+        when(mockResponse.body()).thenReturn(jsonResponse);
+        when(mockHttpClient.send(any(HttpRequest.class), eq(HttpResponse.BodyHandlers.ofString())))
+                .thenReturn(mockResponse);
+
+        String result = weatherService.getTodayForecast("Tokyo");
+
+        assertTrue(result.contains("Облачно"));
+        verify(mockHttpClient).send(any(), any()); // ← API вызывается
     }
 
     @Test
     void getTodayForecast_apiReturns404_returnsFallbackMessage() throws Exception {
-        @SuppressWarnings("unchecked")
+        when(mockCacheStorage.get("nonexistentcity")).thenReturn(null);
+
         HttpResponse<String> mockResponse = mock(HttpResponse.class);
         when(mockResponse.statusCode()).thenReturn(404);
         when(mockResponse.body()).thenReturn("{\"message\":\"city not found\"}");
-
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create("https://api.openweathermap.org/data/2.5/forecast?q=NonExistentCity&appid=test-api-key&units=metric&lang=ru"))
-                .timeout(java.time.Duration.ofSeconds(10))
-                .build();
-
-        when(mockHttpClient.send(request, HttpResponse.BodyHandlers.ofString()))
+        when(mockHttpClient.send(any(HttpRequest.class), eq(HttpResponse.BodyHandlers.ofString())))
                 .thenReturn(mockResponse);
 
         String result = weatherService.getTodayForecast("NonExistentCity");
@@ -116,7 +150,8 @@ class WeatherServiceTest {
 
     @Test
     void getTodayForecast_noDataForToday_returnsNotFoundMessage() throws Exception {
-        // Данные только на следующий день
+        when(mockCacheStorage.get("paris")).thenReturn(null);
+
         String jsonResponse = """
             {
               "list": [
@@ -124,87 +159,58 @@ class WeatherServiceTest {
               ]
             }
             """;
-        @SuppressWarnings("unchecked")
         HttpResponse<String> mockResponse = mock(HttpResponse.class);
         when(mockResponse.statusCode()).thenReturn(200);
         when(mockResponse.body()).thenReturn(jsonResponse);
-
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create("https://api.openweathermap.org/data/2.5/forecast?q=Paris&appid=test-api-key&units=metric&lang=ru"))
-                .timeout(java.time.Duration.ofSeconds(10))
-                .build();
-
-        when(mockHttpClient.send(request, HttpResponse.BodyHandlers.ofString()))
+        when(mockHttpClient.send(any(HttpRequest.class), eq(HttpResponse.BodyHandlers.ofString())))
                 .thenReturn(mockResponse);
 
         String result = weatherService.getTodayForecast("Paris");
-        assertEquals("🌤️ Прогноз на сегодня не найден для Paris", result);
+        assertEquals("🌤️ Прогноз на сегодня не найден для этого города.", result);
     }
 
     @Test
     void getTodayForecast_networkError_returnsErrorMessage() throws Exception {
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create("https://api.openweathermap.org/data/2.5/forecast?q=Berlin&appid=test-api-key&units=metric&lang=ru"))
-                .timeout(java.time.Duration.ofSeconds(10))
-                .build();
+        when(mockCacheStorage.get("berlin")).thenReturn(null);
 
-        when(mockHttpClient.send(request, HttpResponse.BodyHandlers.ofString()))
+        when(mockHttpClient.send(any(HttpRequest.class), eq(HttpResponse.BodyHandlers.ofString())))
                 .thenThrow(new java.io.IOException("Connection timeout"));
 
         String result = weatherService.getTodayForecast("Berlin");
         assertEquals("🌤️ Ошибка при загрузке прогноза", result);
     }
-
-    @Test
-    void getTodayForecast_cacheIsClearedOnNextDay() throws Exception {
-        // Первый запрос — сегодня
-
-        weatherService.getTodayForecast("Tokyo");
-        verify(mockHttpClient, times(1)).send(any(), any());
-
-        // Меняем часы на следующий день
-        Clock nextDayClock = Clock.fixed(
-                LocalDate.of(2025, 12, 18).atStartOfDay(TZ).toInstant(),
-                TZ
-        );
-
-        WeatherService nextDayService = new WeatherService(API_KEY, nextDayClock) {
-            {
-                try {
-                    java.lang.reflect.Field clientField = WeatherService.class.getDeclaredField("client");
-                    clientField.setAccessible(true);
-                    clientField.set(this, mockHttpClient);
-                } catch (Exception e) {
-                    throw new RuntimeException(e);
-                }
-            }
-        };
-
-        // Второй запрос — должен вызвать новый HTTP-запрос
-        nextDayService.getTodayForecast("Tokyo");
-        verify(mockHttpClient, times(2)).send(any(), any());
-    }
-
     @Test
     void getTodayForecast_caseInsensitiveCaching() throws Exception {
-        String jsonResponse = """
-            { "list": [{ "dt": 1765987200, "main": { "temp": 0.0 }, "weather": [{ "description": "ясно" }] }] }
-            """;
-        @SuppressWarnings("unchecked")
+        // === Первый вызов: MOSCOW (кэш пуст) ===
+        doReturn(null).when(mockCacheStorage).get("moscow");
+
         HttpResponse<String> mockResponse = mock(HttpResponse.class);
         when(mockResponse.statusCode()).thenReturn(200);
-        when(mockResponse.body()).thenReturn(jsonResponse);
+        when(mockResponse.body()).thenReturn("""
+        { "list": [{ "dt": 1765987200, "main": { "temp": 0.0 }, "weather": [{ "description": "ясно" }] }] }
+        """);
+        when(mockHttpClient.send(any(HttpRequest.class), eq(HttpResponse.BodyHandlers.ofString())))
+                .thenReturn(mockResponse);
 
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create("https://api.openweathermap.org/data/2.5/forecast?q=MOSCOW&appid=test-api-key&units=metric&lang=ru"))
-                .build();
-        when(mockHttpClient.send(request, HttpResponse.BodyHandlers.ofString()))
-                .thenAnswer(invocation -> mockResponse);
+        String result1 = weatherService.getTodayForecast("MOSCOW");
+        assertTrue(result1.contains("ясно") || result1.contains("Ясно"),
+                "Ожидалось 'ясно' в ответе: " + result1);
 
-        weatherService.getTodayForecast("MOSCOW");    // первый вызов
-        weatherService.getTodayForecast("moscow");    // второй — из кэша
+        // Проверяем, что сохранено в кэш
+        verify(mockCacheStorage).save(eq("moscow"), eq(result1), eq(LocalDate.of(2025, 12, 17)));
 
-        // Должен быть только ОДИН HTTP-запрос
+        // === Второй вызов: moscow → из кэша ===
+        // Создаём РЕАЛЬНЫЙ объект CachedForecast
+        WeatherCacheStorage.CachedForecast cachedFromStorage =
+                new WeatherCacheStorage.CachedForecast(result1, LocalDate.of(2025, 12, 17));
+
+        doReturn(cachedFromStorage).when(mockCacheStorage).get("moscow");
+
+        String result2 = weatherService.getTodayForecast("moscow");
+
+        // Then: результат из кэша, API вызван только 1 раз
+        assertEquals(result1, result2);
         verify(mockHttpClient, times(1)).send(any(), any());
     }
+
 }

@@ -16,7 +16,6 @@ public class WishlistCommand extends AbstractCommand {
         super("wishlist", "Управление картой желаний");
         this.databaseManager = databaseManager;
     }
-
     @Override
     public String execute(Message message) {
         String argument = getCommandArgument(message); // ← НЕ вызываем .trim() здесь!
@@ -62,7 +61,7 @@ public class WishlistCommand extends AbstractCommand {
         if (argument.equals("status")) return "status";
         return "unknown";
     }
-    private String handleAddWish(Long userId, String wishText) {
+    public String handleAddWish(Long userId, String wishText) {
         if (wishText.isEmpty()) {
             return "❌ Текст желания не может быть пустым";
         }

@@ -4,6 +4,7 @@ import com.example.bot.ChatBot;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
+import org.telegram.telegrambots.meta.api.methods.updatingmessages.EditMessageText;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.ReplyKeyboardMarkup;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
@@ -29,7 +30,21 @@ public class TelegramMessageSender implements MessageSender {
             logger.error("Ошибка отправки сообщения в чат {}", chatId, e);
         }
     }
+    public void editMessageText(Long chatId, Integer messageId, String text, InlineKeyboardMarkup replyMarkup) {
+        EditMessageText editMessage = EditMessageText.builder()
+                .chatId(chatId.toString()) // chatId может быть Long, но API принимает String
+                .messageId(messageId)
+                .text(text)
+                .parseMode("Markdown")
+                .replyMarkup(replyMarkup)
+                .build();
 
+        try {
+            chatBot.execute(editMessage); // execute — метод из TelegramLongPollingBot
+        } catch (TelegramApiException e) {
+            logger.error("Не удалось отредактировать сообщение", e);
+        }
+    }
     @Override
     public void sendTextWithKeyboard(Long chatId, String text, ReplyKeyboardMarkup keyboard) {
         SendMessage msg = SendMessage.builder()

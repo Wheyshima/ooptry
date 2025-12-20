@@ -7,17 +7,29 @@ import me.xdrop.fuzzywuzzy.model.ExtractedResult;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 public class CityService {
     private final List<City> cities;
-    private final List<String> cityNames;
+    private final Map<String, City> cityByName;
 
     public CityService(List<City> cities) {
         this.cities = cities;
-        this.cityNames = cities.stream()
-                .map(City::getName)
-                .collect(Collectors.toList());
+        this.cityByName = cities.stream()
+                .collect(Collectors.toMap(
+                        City::getName,
+                        c -> c,
+                        this::resolveDuplicate // метод для разрешения конфликтов
+                ));
+    }
+
+    private City resolveDuplicate(City existing, City replacement) {
+        // Оставляем город с бОльшим населением
+        if (existing.getPopulation() >= replacement.getPopulation()) {
+            return existing;
+        }
+        return replacement;
     }
     private static final Map<String, String> ABBREVIATIONS = Map.of(
             "мск", "Москва",
@@ -32,33 +44,34 @@ public class CityService {
         }
         String clean = input.trim().toLowerCase(Locale.ROOT);
         String full = ABBREVIATIONS.get(clean);
-        if (full != null) {
-            return cities.stream()
-                    .filter(c -> c.getName().equals(full))
-                    .findFirst()
-                    .orElse(null);
+        return cityByName.get(Objects.requireNonNullElse(full, input));
+    }
+    /**
+     * Найти до `limit` городов с помощью нечёткого поиска.
+     * Возвращает города с рейтингом >= minScore (0–100).
+     */
+    public List<City> findCitiesFuzzy(String input, int limit, int minScore) {
+        if (input == null || input.trim().isEmpty()) {
+            return List.of();
         }
 
-        ExtractedResult match = FuzzySearch.extractOne(input, cityNames);
-        if (match != null && match.getScore() >= 80) {
-            String matchedName = match.getString();
-            return cities.stream()
-                    .filter(city -> city.getName().equals(matchedName))
-                    .findFirst()
-                    .orElse(null);
-        }
-        return null;
+        List<ExtractedResult> results = FuzzySearch.extractTop(input, cityByName.keySet(), limit);
+        return results.stream()
+                .filter(r -> r.getScore() >= minScore)
+                .map(ExtractedResult::getString)
+                .map(cityByName::get)
+                .filter(Objects::nonNull)
+                .toList();
     }
-    // В класс CityService
+
     public List<String> getTop10Cities() {
         return cities.stream()
                 .sorted((c1, c2) -> {
                     int cmp = Long.compare(c2.getPopulation(), c1.getPopulation());
-                    if (cmp == 0) {
-                        return c1.getName().compareTo(c2.getName()); // стабилизация
-                    }
+                    if (cmp == 0) return c1.getName().compareTo(c2.getName());
                     return cmp;
-                })                .limit(10)
+                })
+                .limit(10)
                 .map(City::getName)
                 .toList();
     }
