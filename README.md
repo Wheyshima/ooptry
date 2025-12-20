@@ -31,6 +31,10 @@
 
 # 🌟 BestDay Bot
 
+
+
+
+
 **Your personal assistant for mindful and productive daily living**
 
 ## 🎯 Concept
