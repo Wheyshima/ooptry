@@ -350,4 +350,124 @@ MIT © 2025 BestDay Bot Team
 | Интерфейс (клавиатура) | ✅ Проверка наличия кнопок в ответах |
 
 ---
+🛠 1. Подготовка сервера (Ubuntu)
+# 1.1 Установите Java
 
+sudo apt update && sudo apt upgrade -y
+sudo apt install openjdk-21-jdk -y
+java -version
+# 1.2 Настройте рабочую директорию
+bash
+sudo mkdir -p /opt/telegram-bot
+sudo chown $USER:$USER /opt/telegram-bot
+1.3 Создайте systemd-сервис
+Создайте файл /etc/systemd/system/telegram-bot.service:
+
+ini
+
+
+[Unit]
+Description=Telegram Bot Service
+After=network.target postgresql.service
+
+[Service]
+#  Type=simple
+User=deployer
+WorkingDirectory=/opt/telegram-bot
+EnvironmentFile=/opt/telegram-bot/.env
+ExecStart=/usr/bin/java -jar telegram-chat-bot-1.0-SNAPSHOT.jar
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+
+
+
+Активируйте сервис:
+
+bash
+sudo systemctl daemon-reload
+sudo systemctl enable telegram-bot
+⚙️ 2. Настройка приложения
+# 2.1 Создайте .env файл
+В /opt/telegram-bot/.env укажите:
+
+text
+BOT_TOKEN=ваш_токен_бота
+DB_URL=jdbc:postgresql://localhost:5432/tgbotdb
+DB_USERNAME=telegrambot
+DB_PASSWORD=ваш_пароль
+Настройте права:
+
+bash
+sudo chown deployer:deployer /opt/telegram-bot/.env
+sudo chmod 600 /opt/telegram-bot/.env
+2.2 Настройте PostgreSQL
+Создайте пользователя и базу данных:
+
+bash
+sudo -u postgres psql -c "CREATE USER telegrambot WITH PASSWORD 'ваш_пароль';"
+sudo -u postgres psql -c "CREATE DATABASE tgbotdb OWNER telegrambot;"
+Выдайте права:
+
+bash
+sudo -u postgres psql -d tgbotdb -c "GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO telegrambot;"
+sudo -u postgres psql -d tgbotdb -c "GRANT USAGE, CREATE ON SCHEMA public TO telegrambot;"
+🔐 3. Настройка GitHub Secrets
+В репозитории GitHub: Settings → Secrets and variables → Actions → New repository secret
+
+Добавьте:
+
+DEPLOY_HOST — IP вашего сервера
+
+DEPLOY_USER — имя пользователя (например, deployer)
+
+DEPLOY_SSH_KEY — приватный SSH-ключ с сервера
+
+⚡ 4. Настройка GitHub Actions
+# Создайте файл .github/workflows/deploy.yml:
+
+# yaml
+name: Deploy to Ubuntu Server
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+      
+      - name: Build with Maven
+        run: mvn clean package -DskipTests
+      
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ secrets.DEPLOY_HOST }} >> ~/.ssh/known_hosts
+      
+      - name: Deploy to Server
+        run: |
+          scp -i ~/.ssh/id_rsa ./target/*.jar ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:/opt/telegram-bot/telegram-chat-bot-1.0-SNAPSHOT.jar
+          scp -i ~/.ssh/id_rsa .env ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:/opt/telegram-bot/.env
+          ssh -i ~/.ssh/id_rsa ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} "sudo systemctl restart telegram-bot.service"
+🚀 5. Проверка работы
+# Сделайте push в ветку main
+
+
+# Проверьте статус бота на сервере:
+
+sudo systemctl status telegram-bot.service
+sudo journalctl -u telegram-bot.service -f
